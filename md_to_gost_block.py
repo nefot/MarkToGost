@@ -10,9 +10,7 @@
 - Нумерация элементов
 - Правильное форматирование по ГОСТ
 """
-"""
- regex зависает из-за неправильного парсинга параметров. Проблема в том, что regex r"[^\]]+" может вызвать catastrophic backtracking. Давайте исправим это:
-"""
+
 import os
 import re
 from pathlib import Path
@@ -196,6 +194,18 @@ def compute_image_width_cm(doc, fraction=0.70):
     return Cm(avail * fraction)
 
 
+def replace_image_refs(text: str, image_refs: Dict[str, int]) -> str:
+    """Замена ссылок на изображения @img_id на их номера"""
+    if not text or not image_refs:
+        return text
+
+    result = text
+    for img_id, fig_num in image_refs.items():
+        result = result.replace(f"@{img_id}", f"рис. {fig_num}")
+
+    return result
+
+
 # ================================
 # РАБОТА С ТАБЛИЦАМИ
 # ================================
@@ -323,10 +333,12 @@ class HeadingBlock(BaseBlock):
 
 
 @dataclass
+@dataclass
 class ImageBlock(BaseBlock):
     """Блок изображения"""
     path: str
     caption: str
+    img_id: Optional[str] = None
 
 
 @dataclass
@@ -472,6 +484,8 @@ class MarkdownParser:
 
         section_blocks = []
         brace_count = 1  # Одна скобка уже открылась
+        max_iterations = len(self.lines) * 2  # Защита от бесконечного цикла
+        iterations = 0
 
         # Проверяем, есть ли закрывающая скобка на той же строке
         current_line = self.lines[self.index - 1].strip()
@@ -489,7 +503,8 @@ class MarkdownParser:
                            add_page_breaks=add_page_breaks)
 
         # Собираем блоки до закрывающей скобки
-        while self.index < len(self.lines) and brace_count > 0:
+        while self.index < len(self.lines) and brace_count > 0 and iterations < max_iterations:
+            iterations += 1
             line = self.lines[self.index].strip()
 
             if not line:
@@ -506,6 +521,12 @@ class MarkdownParser:
                     self.index += 1
                     continue
 
+            # Проверяем открывающую скобку (вложенные разделы)
+            if self._is_section_with_content(line):
+                # Вложенный раздел - пропускаем его целиком
+                self.index += 1
+                continue
+
             # Парсим блоки внутри раздела
             if self._is_heading(line):
                 section_blocks.append(self._parse_heading(line))
@@ -521,6 +542,10 @@ class MarkdownParser:
                 section_blocks.append(self._parse_text_block())
             else:
                 self.index += 1
+
+        # Если не нашли закрывающую скобку, просто продолжаем со следующей строки
+        if brace_count > 0:
+            pass  # Раздел был незавершён, но мы всё равно продолжаем
 
         return Section(section_id=section_id, blocks=section_blocks, heading_level=heading_level,
                        add_page_breaks=add_page_breaks)
@@ -554,11 +579,13 @@ class MarkdownParser:
         return HeadingBlock(text=text, level=level)
 
     def _parse_image(self, line: str) -> ImageBlock:
-        match = re.match(r'!\[(.*?)\]\((.*?)\)', line)
+        # Поддержка формата: ![caption](path){#id}
+        match = re.match(r'!\[(.*?)\]\((.*?)\)(?:\{#([^}]+)\})?', line)
         caption = match.group(1) if match else ""
         path = match.group(2) if match else ""
+        img_id = match.group(3) if match and match.group(3) else None
         self.index += 1
-        return ImageBlock(path=path, caption=caption)
+        return ImageBlock(path=path, caption=caption, img_id=img_id)
 
     def _parse_table(self) -> TableBlock:
         table_caption = None
@@ -643,7 +670,13 @@ class MarkdownParser:
     def _parse_text_block(self) -> TextBlock:
         """Парсинг блока обычного текста"""
         buffer = []
-        while self.index < len(self.lines):
+        max_iterations = len(self.lines)  # Защита от бесконечного цикла
+        iterations = 0
+
+        start_index = self.index  # Сохраняем начальный индекс
+
+        while self.index < len(self.lines) and iterations < max_iterations:
+            iterations += 1
             line = self.lines[self.index].strip()
 
             # Проверяем условия остановки
@@ -657,6 +690,12 @@ class MarkdownParser:
                 break
 
             buffer.append(line)
+            self.index += 1
+
+        # Если никакие из проверок не прошли и индекс не изменился, вынуждаем движение вперёд
+        if self.index == start_index and self.index < len(self.lines):
+            # Странная строка, которая не соответствует никаким условиям
+            buffer.append(self.lines[self.index].strip())
             self.index += 1
 
         return TextBlock(text=" ".join(buffer))
@@ -674,6 +713,7 @@ class DocumentRenderer:
         self.table_counter = 1
         self.figure_counter = 0
         self.image_map = {}
+        self.image_refs = {}  # Для хранения ссылок на изображения по их ID
         self.first_h1_seen = False
         self.first_h4_seen = False
         self.chapter_num = 0
@@ -733,7 +773,7 @@ class DocumentRenderer:
                     level = get_heading_level_from_number(section.section_id)
                     heading_block = HeadingBlock(text=section.section_id, level=level)
                     self._render_heading_block(heading_block)
-            
+
             for block in section.blocks:
                 self.render_block(block)
             return
@@ -772,8 +812,11 @@ class DocumentRenderer:
         self._safe_page_break()
 
     def _render_text_block(self, block: TextBlock):
-        """Рендеринг текстового блока"""
-        p = self.doc.add_paragraph(block.text)
+        """Рендеринг текстового блока с заменой ссылок на изображения"""
+        # Заменяем ссылки @img_id на номера
+        text = replace_image_refs(block.text, self.image_refs)
+
+        p = self.doc.add_paragraph(text)
         set_paragraph_formatting(
             p,
             align=WD_ALIGN_PARAGRAPH.JUSTIFY,
@@ -783,21 +826,21 @@ class DocumentRenderer:
 
         # Применяем курсив
         p.clear()
-        for part_text, is_italic in apply_italic_formatting(block.text):
+        for part_text, is_italic in apply_italic_formatting(text):
             run = p.add_run(part_text)
             set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, italic=is_italic)
-        
+
         self._mark_content()
 
     def _render_heading_block(self, block: HeadingBlock):
         """Рендеринг заголовка с применением Word стилей"""
         # Ограничиваем уровень до 9 (максимум для Word)
         level = min(block.level, 9)
-        
+
         # Применяем соответствующий Word стиль
         style_name = f'Heading {level}'
         p = self.doc.add_paragraph(style=style_name)
-        
+
         # Установка выравнивания в зависимости от уровня
         if level == 1:
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -805,10 +848,10 @@ class DocumentRenderer:
         else:
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
             set_paragraph_formatting(p, space_before=0, space_after=0)
-        
+
         # Явно устанавливаем outline level для правильной иерархии
         p.paragraph_format.outline_level = level - 1  # Word использует 0-based уровни
-        
+
         # Очищаем параграф и добавляем текст с форматированием
         p.clear()
         for part_text, is_italic in apply_italic_formatting(
@@ -816,7 +859,7 @@ class DocumentRenderer:
         ):
             run = p.add_run(part_text)
             set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
-        
+
         self._mark_content()
 
     def _render_image_block(self, block: ImageBlock):
@@ -836,15 +879,25 @@ class DocumentRenderer:
             except Exception:
                 pic_para.add_run(f"[Ошибка вставки: {os.path.basename(img_path)}]")
 
-            # Подпись
-            self.figure_counter += 1
+            # Получаем номер изображения
+            # Если img_id указан и был собран на первом проходе, используем сохраненный номер
+            if block.img_id and block.img_id in self.image_refs:
+                fig_num = self.image_refs[block.img_id]
+            else:
+                # Иначе увеличиваем счетчик
+                self.figure_counter += 1
+                fig_num = self.figure_counter
+                # Сохраняем в image_refs, если есть ID
+                if block.img_id:
+                    self.image_refs[block.img_id] = fig_num
+
             fname = os.path.basename(block.path)
             caption_text = block.caption or ""
 
             if caption_text:
-                caption_full = f"Рисунок {self.figure_counter} - {caption_text.strip().capitalize()}"
+                caption_full = f"Рисунок {fig_num} - {caption_text.strip().capitalize()}"
             else:
-                caption_full = f"Рисунок {self.figure_counter}"
+                caption_full = f"Рисунок {fig_num}"
 
             cap_para = self.doc.add_paragraph(caption_full)
             cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -857,7 +910,7 @@ class DocumentRenderer:
                 set_run_font(run, size_pt=DocumentSettings.CAPTION_FONT_SIZE_PT,
                              italic=DocumentSettings.CAPTION_ITALIC or is_italic)
 
-            self.image_map[fname] = str(self.figure_counter)
+            self.image_map[fname] = str(fig_num)
             self._mark_content()
         else:
             p = self.doc.add_paragraph(f"[Изображение не найдено: {os.path.basename(img_path)}]")
@@ -910,7 +963,7 @@ class DocumentRenderer:
                 for part_text, is_italic in apply_italic_formatting(item):
                     run = p.add_run(part_text)
                     set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, italic=is_italic)
-        
+
         self._mark_content()
 
     def _render_code_block(self, block: CodeBlock):
@@ -957,13 +1010,15 @@ class DocumentRenderer:
         p.paragraph_format.right_indent = Cm(0.5)
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after = Pt(6)
-        
+
         self._mark_content()
 
     def _render_table_block(self, block: TableBlock):
-        """Рендеринг таблицы"""
+        """Рендеринг таблицы с разбиением на части при переносе"""
         if not block.rows:
             return
+
+        MAX_ROWS_PER_PAGE = 25  # максимум строк на странице (включая заголовок)
 
         parsed_rows = [split_md_table_row(row) for row in block.rows]
         max_cols = max(len(r) for r in parsed_rows) if parsed_rows else 0
@@ -975,79 +1030,100 @@ class DocumentRenderer:
             if len(row) < max_cols:
                 row.extend([""] * (max_cols - len(row)))
 
-        # Подпись над таблицей
-        cap = self.doc.add_paragraph()
-        cap.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        set_paragraph_formatting(
-            cap,
-            first_line_indent=None,
-            left_indent=Cm(0),
-            space_before=6,
-            space_after=0,
-            line_spacing=DocumentSettings.LINE_SPACING
-        )
-
-        if block.caption:
-            caption_full = f"Таблица {self.table_counter} — {block.caption}"
-        else:
-            caption_full = f"Таблица {self.table_counter}"
-
-        # Применяем курсив
-        cap.clear()
-        for part_text, is_italic in apply_italic_formatting(caption_full):
-            run = cap.add_run(part_text)
-            set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False, italic=is_italic)
-
-        # Таблица
-        table = self.doc.add_table(rows=len(parsed_rows), cols=max_cols)
-        try:
-            table.style = 'Table Grid'
-        except Exception:
-            pass
-        table.alignment = WD_TABLE_ALIGNMENT.LEFT
-        table.autofit = False
+        # Разбиваем таблицу на части (первая часть включает заголовок)
+        chunks = [
+            parsed_rows[i:i + MAX_ROWS_PER_PAGE]
+            for i in range(0, len(parsed_rows), MAX_ROWS_PER_PAGE)
+        ]
 
         # Ширина колонок
         sec = self.doc.sections[0]
         usable_width_cm = sec.page_width.cm - sec.left_margin.cm - sec.right_margin.cm
         col_width = Cm(usable_width_cm / max_cols) if max_cols else Cm(usable_width_cm)
 
-        for col_idx in range(max_cols):
-            for row in table.rows:
-                row.cells[col_idx].width = col_width
+        # Рендеринг каждой части таблицы
+        for chunk_index, chunk in enumerate(chunks):
+            # --- Подпись над таблицей ---
+            cap = self.doc.add_paragraph()
+            cap.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            set_paragraph_formatting(
+                cap,
+                first_line_indent=None,
+                left_indent=Cm(0),
+                space_before=6,
+                space_after=0,
+                line_spacing=DocumentSettings.LINE_SPACING
+            )
 
-        # Повтор заголовка
-        set_repeat_table_header(table.rows[0])
+            # Формируем подпись
+            if chunk_index == 0:
+                if block.caption:
+                    caption_full = f"Таблица {self.table_counter} — {block.caption}"
+                else:
+                    caption_full = f"Таблица {self.table_counter}"
+            else:
+                caption_full = f"Продолжение таблицы {self.table_counter}"
 
-        # Заполнение ячеек
-        for r_idx, row_data in enumerate(parsed_rows):
-            row = table.rows[r_idx]
-            for c_idx, value in enumerate(row_data):
-                cell = row.cells[c_idx]
-                # Очищаем ячейку перед заполнением
-                cell.text = ""
-                # Добавляем содержимое с форматированием
-                for p in cell.paragraphs:
-                    p.clear()
-                # Теперь добавляем текст
-                p = cell.paragraphs[0]
-                p.style = None  # Не применяем стиль, чтобы избежать отступов
-                p.paragraph_format.first_line_indent = Pt(0)
-                p.paragraph_format.left_indent = Pt(0)
-                p.paragraph_format.right_indent = Pt(0)
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = DocumentSettings.LINE_SPACING
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER if r_idx == 0 else WD_ALIGN_PARAGRAPH.LEFT
+            # Применяем форматирование к подписи
+            cap.clear()
+            for part_text, is_italic in apply_italic_formatting(caption_full):
+                run = cap.add_run(part_text)
+                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False, italic=is_italic)
 
-                # Применяем курсив к тексту
-                for part_text, is_italic in apply_italic_formatting(value if value is not None else ""):
-                    run = p.add_run(part_text)
-                    set_run_font(run, size_pt=DocumentSettings.TABLE_FONT_SIZE_PT, bold=r_idx == 0, italic=is_italic)
+            # --- Создаём таблицу ---
+            table = self.doc.add_table(rows=len(chunk), cols=max_cols)
+            try:
+                table.style = 'Table Grid'
+            except Exception:
+                pass
+            table.alignment = WD_TABLE_ALIGNMENT.LEFT
+            table.autofit = False
 
-                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            # Установка ширины колонок
+            for col_idx in range(max_cols):
+                for row in table.rows:
+                    row.cells[col_idx].width = col_width
 
-        set_table_borders(table)
+            # Повтор заголовка на каждой части
+            if chunk:
+                set_repeat_table_header(table.rows[0])
+
+            # --- Заполнение ячеек ---
+            for r_idx, row_data in enumerate(chunk):
+                row = table.rows[r_idx]
+                for c_idx, value in enumerate(row_data):
+                    cell = row.cells[c_idx]
+                    # Очищаем ячейку
+                    cell.text = ""
+
+                    # Добавляем содержимое
+                    for p in cell.paragraphs:
+                        p.clear()
+
+                    p = cell.paragraphs[0]
+                    p.style = None
+                    p.paragraph_format.first_line_indent = Pt(0)
+                    p.paragraph_format.left_indent = Pt(0)
+                    p.paragraph_format.right_indent = Pt(0)
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = DocumentSettings.LINE_SPACING
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER if r_idx == 0 else WD_ALIGN_PARAGRAPH.LEFT
+
+                    # Применяем форматирование текста
+                    for part_text, is_italic in apply_italic_formatting(value if value is not None else ""):
+                        run = p.add_run(part_text)
+                        set_run_font(run, size_pt=DocumentSettings.TABLE_FONT_SIZE_PT, bold=r_idx == 0, italic=is_italic)
+
+                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+
+            set_table_borders(table)
+
+            # Разрыв страницы между кусками (кроме последней)
+            if chunk_index < len(chunks) - 1:
+                self.doc.add_page_break()
+
+        # Увеличиваем счётчик таблиц после всех частей
         self.table_counter += 1
         self._mark_content()
 
