@@ -548,8 +548,8 @@ class MarkdownParser:
         return line.startswith("```")
 
     def _parse_heading(self, line: str) -> HeadingBlock:
-        level = len(line.split(" ")[0])
-        text = line[level:].strip()
+        text = line.lstrip('#').strip()
+        level = get_heading_level_from_number(text)
         self.index += 1
         return HeadingBlock(text=text, level=level)
 
@@ -720,8 +720,19 @@ class DocumentRenderer:
         if not section.add_page_breaks:
             # Если page breaks отключены, просто рендерим содержимое
             if section.section_id:
-                heading_block = HeadingBlock(text=section.section_id, level=section.heading_level)
-                self._render_heading_block(heading_block)
+                if section.section_id == "ОГЛАВЛЕНИЕ":
+                    # Обычный текст, НЕ Heading (чтобы не попало в TOC)
+                    p = self.doc.add_paragraph()
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                    run = p.add_run(section.section_id)
+                    set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True)
+
+                    self._mark_content()
+                else:
+                    level = get_heading_level_from_number(section.section_id)
+                    heading_block = HeadingBlock(text=section.section_id, level=level)
+                    self._render_heading_block(heading_block)
             
             for block in section.blocks:
                 self.render_block(block)
@@ -733,21 +744,25 @@ class DocumentRenderer:
 
         # 🔹 Заголовок раздела
         if section.section_id:
-            heading_block = HeadingBlock(text=section.section_id, level=section.heading_level)
-            self._render_heading_block(heading_block)
+            if section.section_id == "ОГЛАВЛЕНИЕ":
+                # Обычный текст, НЕ Heading (чтобы не попало в TOC)
+                p = self.doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_paragraph_formatting(p, space_before=0, space_after=6)
+
+                run = p.add_run(section.section_id)
+                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True)
+
+                self._mark_content()
+            else:
+                level = get_heading_level_from_number(section.section_id)
+                heading_block = HeadingBlock(text=section.section_id, level=level)
+                self._render_heading_block(heading_block)
 
         # 🔹 Специальная обработка для оглавления
         if section.section_id == "ОГЛАВЛЕНИЕ":
-            for level, text in self.toc_entries:
-                indent = "    " * (level - 4)
-                p = self.doc.add_paragraph()
-                set_paragraph_formatting(p, align=WD_ALIGN_PARAGRAPH.LEFT, first_line_indent=None, space_before=0,
-                                         space_after=0)
-                p.clear()
-                for part_text, is_italic in apply_italic_formatting(f"{indent}{text}"):
-                    run = p.add_run(part_text)
-                    set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, italic=is_italic)
-                self._mark_content()
+            add_toc(self.doc)
+            self._mark_content()
 
         # 🔹 Контент раздела
         for block in section.blocks:
@@ -775,48 +790,34 @@ class DocumentRenderer:
         self._mark_content()
 
     def _render_heading_block(self, block: HeadingBlock):
-        """Рендеринг заголовка"""
-        if block.level == 1:
-            p = self.doc.add_paragraph()
+        """Рендеринг заголовка с применением Word стилей"""
+        # Ограничиваем уровень до 9 (максимум для Word)
+        level = min(block.level, 9)
+        
+        # Применяем соответствующий Word стиль
+        style_name = f'Heading {level}'
+        p = self.doc.add_paragraph(style=style_name)
+        
+        # Установка выравнивания в зависимости от уровня
+        if level == 1:
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_paragraph_formatting(p, space_before=0, space_after=6)
-            p.paragraph_format.outline_level = 1  # Явно устанавливаем outline level
-
-            # Применяем курсив
-            p.clear()
-            for part_text, is_italic in apply_italic_formatting(block.text.upper()):
-                run = p.add_run(part_text)
-                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
-            
-            self._mark_content()
-
-        elif block.level == 4:
-            p = self.doc.add_paragraph()
+        else:
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
             set_paragraph_formatting(p, space_before=0, space_after=0)
-            p.paragraph_format.outline_level = 4  # Явно устанавливаем outline level
-
-            # Применяем курсив
-            p.clear()
-            for part_text, is_italic in apply_italic_formatting(block.text):
-                run = p.add_run(part_text)
-                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
-            
-            self._mark_content()
-
-        else:
-            p = self.doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            set_paragraph_formatting(p, first_line_indent=None)
-            p.paragraph_format.outline_level = block.level  # Явно устанавливаем outline level
-
-            # Применяем курсив
-            p.clear()
-            for part_text, is_italic in apply_italic_formatting(block.text):
-                run = p.add_run(part_text)
-                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
-            
-            self._mark_content()
+        
+        # Явно устанавливаем outline level для правильной иерархии
+        p.paragraph_format.outline_level = level - 1  # Word использует 0-based уровни
+        
+        # Очищаем параграф и добавляем текст с форматированием
+        p.clear()
+        for part_text, is_italic in apply_italic_formatting(
+            block.text.upper() if level == 1 else block.text
+        ):
+            run = p.add_run(part_text)
+            set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
+        
+        self._mark_content()
 
     def _render_image_block(self, block: ImageBlock):
         """Рендеринг изображения"""
@@ -1085,22 +1086,26 @@ def add_toc(document):
 # ОСНОВНАЯ ЛОГИКА
 # ================================
 
+def get_heading_level_from_number(text: str) -> int:
+    """
+    Определяет уровень заголовка по нумерации:
+    1. → 1
+    1.1 → 2
+    1.1.1 → 3
+    """
+    match = re.match(r'^(\d+(?:\.\d+)*)', text.strip())
+    if not match:
+        return 1  # если нет номера — считаем верхним уровнем
+    
+    number = match.group(1)
+    level = number.count('.') + 1
+    # Защита: Word поддерживает максимум Heading 1-9
+    return min(level, 9)
+
+
 def get_toc_level(text: str) -> int:
-    """Определение уровня оглавления на основе текста заголовка"""
-    text = text.strip()
-    parts = text.split('.')
-    if len(parts) > 1 and parts[0].strip().isdigit():
-        # Считаем количество цифровых частей перед текстом
-        digit_count = 0
-        for part in parts:
-            part = part.strip()
-            if part.isdigit():
-                digit_count += 1
-            else:
-                break
-        return 3 + digit_count  # Базовый уровень 4 для ####, плюс вложенность
-    else:
-        return 4  # Для заголовков без нумерации
+    """Определение уровня оглавления на основе нумерации текста заголовка"""
+    return get_heading_level_from_number(text)
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
