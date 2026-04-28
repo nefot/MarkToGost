@@ -680,6 +680,21 @@ class DocumentRenderer:
         self.section_num = 0
         self.subsection_num = 0
         self.toc_entries = toc_entries or []
+        self._last_was_break = False  # Флаг для защиты от двойных разрывов
+
+    def _is_document_start(self) -> bool:
+        """Проверка начала документа"""
+        return len(self.doc.paragraphs) == 0
+
+    def _safe_page_break(self):
+        """Не допускает двойных пустых страниц"""
+        if not self._last_was_break:
+            self.doc.add_page_break()
+            self._last_was_break = True
+
+    def _mark_content(self):
+        """Сброс флага page break после добавления контента"""
+        self._last_was_break = False
 
     def render_block(self, block: BaseBlock):
         """Рендеринг блока"""
@@ -699,17 +714,29 @@ class DocumentRenderer:
             self._render_code_block(block)
 
     def _render_section_block(self, section: Section):
-        """Рендеринг раздела с его блоками"""
-        # Добавляем page break ДО раздела (если включено)
-        if section.add_page_breaks:
-            self.doc.add_page_break()
+        """Рендеринг раздела с его блоками
+        Строгое правило: раздел ВСЕГДА начинается и заканчивается разрывом (если включено)
+        """
+        if not section.add_page_breaks:
+            # Если page breaks отключены, просто рендерим содержимое
+            if section.section_id:
+                heading_block = HeadingBlock(text=section.section_id, level=section.heading_level)
+                self._render_heading_block(heading_block)
+            
+            for block in section.blocks:
+                self.render_block(block)
+            return
 
-        # Добавляем заголовок раздела с указанным уровнем
+        # 🔹 ВСЕГДА начинаем с новой страницы (кроме самого начала документа)
+        if not self._is_document_start():
+            self._safe_page_break()
+
+        # 🔹 Заголовок раздела
         if section.section_id:
             heading_block = HeadingBlock(text=section.section_id, level=section.heading_level)
             self._render_heading_block(heading_block)
 
-        # Специальная обработка для оглавления
+        # 🔹 Специальная обработка для оглавления
         if section.section_id == "ОГЛАВЛЕНИЕ":
             for level, text in self.toc_entries:
                 indent = "    " * (level - 4)
@@ -720,14 +747,14 @@ class DocumentRenderer:
                 for part_text, is_italic in apply_italic_formatting(f"{indent}{text}"):
                     run = p.add_run(part_text)
                     set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, italic=is_italic)
+                self._mark_content()
 
-        # Рендерим все блоки внутри раздела
+        # 🔹 Контент раздела
         for block in section.blocks:
             self.render_block(block)
 
-        # Добавляем page break ПОСЛЕ раздела (если включено)
-        if section.add_page_breaks:
-            self.doc.add_page_break()
+        # 🔹 ВСЕГДА завершаем раздел разрывом страницы
+        self._safe_page_break()
 
     def _render_text_block(self, block: TextBlock):
         """Рендеринг текстового блока"""
@@ -744,15 +771,12 @@ class DocumentRenderer:
         for part_text, is_italic in apply_italic_formatting(block.text):
             run = p.add_run(part_text)
             set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, italic=is_italic)
+        
+        self._mark_content()
 
     def _render_heading_block(self, block: HeadingBlock):
         """Рендеринг заголовка"""
         if block.level == 1:
-            if self.first_h1_seen:
-                self.doc.add_page_break()
-            else:
-                self.first_h1_seen = True
-
             p = self.doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_paragraph_formatting(p, space_before=0, space_after=6)
@@ -763,12 +787,10 @@ class DocumentRenderer:
             for part_text, is_italic in apply_italic_formatting(block.text.upper()):
                 run = p.add_run(part_text)
                 set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
+            
+            self._mark_content()
 
         elif block.level == 4:
-            if not self.first_h4_seen:
-                self.doc.add_page_break()
-            self.first_h4_seen = True
-
             p = self.doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
             set_paragraph_formatting(p, space_before=0, space_after=0)
@@ -779,6 +801,8 @@ class DocumentRenderer:
             for part_text, is_italic in apply_italic_formatting(block.text):
                 run = p.add_run(part_text)
                 set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
+            
+            self._mark_content()
 
         else:
             p = self.doc.add_paragraph()
@@ -791,6 +815,8 @@ class DocumentRenderer:
             for part_text, is_italic in apply_italic_formatting(block.text):
                 run = p.add_run(part_text)
                 set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
+            
+            self._mark_content()
 
     def _render_image_block(self, block: ImageBlock):
         """Рендеринг изображения"""
@@ -831,9 +857,11 @@ class DocumentRenderer:
                              italic=DocumentSettings.CAPTION_ITALIC or is_italic)
 
             self.image_map[fname] = str(self.figure_counter)
+            self._mark_content()
         else:
             p = self.doc.add_paragraph(f"[Изображение не найдено: {os.path.basename(img_path)}]")
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            self._mark_content()
 
     def _render_list_block(self, block: ListBlock):
         """Рендеринг списка"""
@@ -881,6 +909,8 @@ class DocumentRenderer:
                 for part_text, is_italic in apply_italic_formatting(item):
                     run = p.add_run(part_text)
                     set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, italic=is_italic)
+        
+        self._mark_content()
 
     def _render_code_block(self, block: CodeBlock):
         """Рендеринг блока кода"""
@@ -926,6 +956,8 @@ class DocumentRenderer:
         p.paragraph_format.right_indent = Cm(0.5)
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after = Pt(6)
+        
+        self._mark_content()
 
     def _render_table_block(self, block: TableBlock):
         """Рендеринг таблицы"""
@@ -1016,6 +1048,7 @@ class DocumentRenderer:
 
         set_table_borders(table)
         self.table_counter += 1
+        self._mark_content()
 
 
 def add_toc(document):
