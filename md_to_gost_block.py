@@ -23,11 +23,116 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+import subprocess
+import tempfile
+from docx import Document
+from copy import deepcopy
 
+def convert_inline_math(text: str) -> str:
+    """
+    Конвертирует inline math $...$ в читаемый текст.
+    Убирает знаки доллара, оставляя содержимое.
+
+    Примеры:
+        $F$ → F
+        $m_1$ → m₁  (нижний индекс через юникод)
+        $6.674 \\times 10^{-11}$ → 6.674×10⁻¹¹
+        $E_k$ → Eₖ
+    """
+    if not text:
+        return text
+
+    # Словари для конвертации индексов в юникод
+    SUBSCRIPT_MAP = str.maketrans("0123456789aeinoruvxhklmnpst", "₀₁₂₃₄₅₆₇₈₉ₐₑᵢₙₒᵣᵤᵥₓₕₖₗₘₙₚₛₜ")
+    SUPERSCRIPT_MAP = str.maketrans("0123456789+-=()ni", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ")
+
+    def process_math(m: str) -> str:
+        """Обрабатывает содержимое между знаками $"""
+        # Замены LaTeX команд
+        m = re.sub(r'\s*\\times\s*', '×', m)
+        m = m.replace(r'\cdot', '·')
+        m = m.replace(r'\pm', '±')
+        m = m.replace(r'\leq', '≤')
+        m = m.replace(r'\geq', '≥')
+        m = m.replace(r'\neq', '≠')
+        m = m.replace(r'\alpha', 'α')
+        m = m.replace(r'\beta', 'β')
+        m = m.replace(r'\gamma', 'γ')
+        m = m.replace(r'\delta', 'δ')
+        m = m.replace(r'\Delta', 'Δ')
+        m = m.replace(r'\sigma', 'σ')
+        m = m.replace(r'\rho', 'ρ')
+        m = m.replace(r'\mu', 'μ')
+        m = m.replace(r'\lambda', 'λ')
+        m = m.replace(r'\omega', 'ω')
+        m = m.replace(r'\Omega', 'Ω')
+        m = m.replace(r'\pi', 'π')
+        m = m.replace(r'\infty', '∞')
+        m = m.replace(r'\frac', '')
+
+        # Нижние индексы _x или _{xxx}
+        def replace_sub(match):
+            content = match.group(1) or match.group(2)
+            return content.translate(SUBSCRIPT_MAP)
+
+        m = re.sub(r'_\{([^}]+)\}|_([^{}\s])', replace_sub, m)
+
+        # Верхние индексы ^x или ^{xxx}
+        def replace_sup(match):
+            content = match.group(1) or match.group(2)
+            return content.translate(SUPERSCRIPT_MAP)
+
+        m = re.sub(r'\^\{([^}]+)\}|\^([^{}\s])', replace_sup, m)
+
+        # Убираем оставшиеся фигурные скобки
+        m = m.replace('{', '').replace('}', '')
+
+        return m.strip()
+
+    # Заменяем $...$
+    result = re.sub(r'\$([^$]+)\$', lambda match: process_math(match.group(1)), text)
+    return result
 
 # ================================
 # КОНФИГУРАЦИЯ И НАСТРОЙКИ
 # ================================
+def render_formula_with_pandoc(latex: str) -> Document:
+    """Генерирует DOCX с формулой через Pandoc или текстовый резервный вариант"""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        md_path = os.path.join(tmpdir, "formula.md")
+        docx_path = os.path.join(tmpdir, "formula.docx")
+
+        # ВАЖНО: display math
+        md_content = f"$${latex}$$"
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+
+        try:
+            subprocess.run([
+                "pandoc",
+                md_path,
+                "-o",
+                docx_path
+            ], check=True, capture_output=True, timeout=10)
+
+            return Document(docx_path)
+        except (FileNotFoundError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            # Если pandoc не установлен или произошла ошибка, создаем документ с текстом формулы
+            doc = Document()
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(f"${latex}$")
+            run.font.size = Pt(DocumentSettings.FONT_SIZE_PT)
+            return doc
+
+
+def append_docx_content(src_doc: Document, dst_doc: Document):
+    """Копирует содержимое одного docx в другой"""
+    for element in src_doc.element.body:
+        dst_doc.element.body.append(deepcopy(element))
+
+from docx.oxml import parse_xml
 
 class DocumentSettings:
     """Настройки документа"""
@@ -35,7 +140,6 @@ class DocumentSettings:
     FONT_SIZE_PT = 14
     LINE_SPACING = 1.5
     FIRST_LINE_INDENT_CM = 1.25
-
     # Размеры страницы A4
     PAGE_WIDTH_CM = 21.0
     PAGE_HEIGHT_CM = 29.7
@@ -361,7 +465,13 @@ class CodeBlock(BaseBlock):
     code: str
     language: str = ""
 
-
+@dataclass
+class FormulaBlock(BaseBlock):
+    """Блок формулы LaTeX (Pandoc + ГОСТ)"""
+    latex: str
+    formula_id: Optional[str] = None
+    explanation: Optional[str] = None
+    number: Optional[str] = None
 @dataclass
 class Section(BaseBlock):
     """Раздел документа с уникальным идентификатором и блоками"""
@@ -395,6 +505,8 @@ class MarkdownParser:
 
             if self._is_section_start(line):
                 blocks.append(self._parse_section())
+            elif self._is_formula_block(line):
+                blocks.append(self._parse_formula_block())
             elif self._is_heading(line):
                 blocks.append(self._parse_heading(line))
             elif self._is_image(line):
@@ -416,6 +528,60 @@ class MarkdownParser:
     def _is_section_start(self, line: str) -> bool:
         """Проверка начала раздела: [//]: # (ID), [//]: ## (ID), [//]: ### (ID), [//]: #### (ID) и т.д."""
         return bool(re.match(r'^\[//\]:\s*#{1,6}\s*\([^)]+\)', line))
+
+    def _is_formula_block(self, line):
+        """Проверка начала блока формулы ($$)"""
+        return line.startswith("$$")
+
+    def _parse_formula_block(self):
+        line = self.lines[self.index].strip()
+        line = line[2:].strip()  # Убираем начальные $$
+
+        buffer = []
+        while True:
+            if "$$" in line:
+                before, _, _ = line.partition("$$")
+                before = before.strip()
+                if before:
+                    buffer.append(before)
+                break
+            else:
+                if line:
+                    buffer.append(line)
+                self.index += 1
+                if self.index >= len(self.lines):
+                    break
+                line = self.lines[self.index].strip()
+
+        self.index += 1  # Пропускаем строку с $$
+
+        formula_text = "\\n".join(buffer).strip()
+
+        # Собираем строки пояснения "где ..."
+        explanation_lines = []
+        while self.index < len(self.lines):
+            peek = self.lines[self.index].strip()
+
+            if not peek:
+                # Пустая строка — смотрим вперёд
+                if self.index + 1 < len(self.lines):
+                    next_line = self.lines[self.index + 1].strip()
+                    if next_line.startswith('$') or next_line.lower().startswith('где'):
+                        self.index += 1
+                        continue
+                break
+
+            # Стоп-условия
+            if (peek.startswith('#') or peek.startswith('$$') or
+                    peek.startswith('![') or peek.startswith('[//]:')):
+                break
+
+            explanation_lines.append(peek)
+            self.index += 1
+
+        explanation = "\\n".join(explanation_lines).strip() if explanation_lines else None
+
+        return FormulaBlock(latex=formula_text, explanation=explanation)
 
     def _extract_section_info(self, line: str) -> tuple[Optional[str], int, bool]:
         """Извлечение ID раздела, уровня заголовка и параметров из строки [//]: #### (ID)[params]
@@ -530,6 +696,8 @@ class MarkdownParser:
             # Парсим блоки внутри раздела
             if self._is_heading(line):
                 section_blocks.append(self._parse_heading(line))
+            elif self._is_formula_block(line):
+                section_blocks.append(self._parse_formula_block())
             elif self._is_image(line):
                 section_blocks.append(self._parse_image(line))
             elif self._is_table_start():
@@ -684,6 +852,8 @@ class MarkdownParser:
                 break
             if line == "}" or line.endswith("}"):  # Закрывающая скобка раздела
                 break
+            if line.startswith("$$"):  # Формула
+                break
             if self._is_table_start() or self._is_list_start():
                 break
             if self._is_section_start(line):
@@ -711,9 +881,11 @@ class DocumentRenderer:
     def __init__(self, doc: Document, toc_entries: List[tuple] = None):
         self.doc = doc
         self.table_counter = 1
+        self.formula_counter = 1  # Счетчик формул
         self.figure_counter = 0
         self.image_map = {}
         self.image_refs = {}  # Для хранения ссылок на изображения по их ID
+        self.formula_refs = {}  # Для хранения ссылок на формулы по их ID
         self.first_h1_seen = False
         self.first_h4_seen = False
         self.chapter_num = 0
@@ -752,6 +924,8 @@ class DocumentRenderer:
             self._render_table_block(block)
         elif isinstance(block, CodeBlock):
             self._render_code_block(block)
+        elif isinstance(block, FormulaBlock):
+            self._render_formula_block(block)
 
     def _render_section_block(self, section: Section):
         """Рендеринг раздела с его блоками
@@ -810,6 +984,97 @@ class DocumentRenderer:
 
         # 🔹 ВСЕГДА завершаем раздел разрывом страницы
         self._safe_page_break()
+
+    def _render_formula_block(self, block: FormulaBlock):
+        # --- Нумерация ---
+        if not block.number:
+            block.number = str(self.formula_counter)
+            self.formula_counter += 1
+
+        if block.formula_id:
+            self.formula_refs[block.formula_id] = block.number
+
+        # --- Получаем формулу через Pandoc ---
+        formula_doc = render_formula_with_pandoc(block.latex)
+
+        # --- Создаём таблицу 1x2 ---
+        table = self.doc.add_table(rows=1, cols=2)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.autofit = False
+
+        # ширины колонок
+        sec = self.doc.sections[0]
+        usable_width = sec.page_width.cm - sec.left_margin.cm - sec.right_margin.cm
+
+        table.columns[0].width = Cm(usable_width * 0.85)
+        table.columns[1].width = Cm(usable_width * 0.15)
+
+        # --- Левая ячейка (формула) ---
+        left_cell = table.cell(0, 0)
+        left_cell.text = ""
+
+        # вставляем формулу внутрь ячейки
+        for el in formula_doc.element.body:
+            left_cell._element.append(deepcopy(el))
+
+        for p in left_cell.paragraphs:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # --- Правая ячейка (номер) ---
+        right_cell = table.cell(0, 1)
+        right_cell.text = ""
+
+        p = right_cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+        run = p.add_run(f"({block.number})")
+        set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT)
+
+        # --- Убираем границы таблицы ---
+        tbl = table._tbl
+        tblPr = tbl.tblPr
+
+        borders = OxmlElement('w:tblBorders')
+        for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+            el = OxmlElement(f'w:{edge}')
+            el.set(qn('w:val'), 'nil')
+            borders.append(el)
+
+        tblPr.append(borders)
+
+        # --- Пояснение ---
+        if block.explanation:
+            lines = block.explanation.strip().split('\\n')
+            for raw_line in lines:
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                line_text = convert_inline_math(raw_line)
+                exp_p = self.doc.add_paragraph()
+                set_paragraph_formatting(
+                    exp_p,
+                    align=WD_ALIGN_PARAGRAPH.LEFT,
+                    first_line_indent=Cm(DocumentSettings.FIRST_LINE_INDENT_CM),
+                    line_spacing=DocumentSettings.LINE_SPACING,
+                    space_before=0,
+                    space_after=0
+                )
+                run = exp_p.add_run(line_text)
+                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT)
+
+        self.doc.add_paragraph()
+        self._mark_content()
+    def _render_formula(self, latex: str):
+        """Старый метод для совместимости (упрощенный рендеринг)"""
+        p = self.doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        try:
+            omml = latex_to_omml(latex)
+            p._p.append(omml)
+        except:
+            run = p.add_run(f"${latex}$")
+            set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT)
 
     def _render_text_block(self, block: TextBlock):
         """Рендеринг текстового блока с заменой ссылок на изображения"""
