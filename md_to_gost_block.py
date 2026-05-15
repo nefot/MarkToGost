@@ -1112,7 +1112,7 @@ class DocumentRenderer:
             set_paragraph_formatting(p, space_before=0, space_after=6)
         else:
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            set_paragraph_formatting(p, space_before=0, space_after=0)
+            set_paragraph_formatting(p, space_before=12, space_after=6)
 
         # Явно устанавливаем outline level для правильной иерархии
         p.paragraph_format.outline_level = level - 1  # Word использует 0-based уровни
@@ -1278,39 +1278,80 @@ class DocumentRenderer:
 
         self._mark_content()
 
+    def _estimate_row_height_cm(self, row_data: list, col_width_cm: float, size_pt: int = 12) -> float:
+        LINE_HEIGHT_CM = size_pt * 0.0353  # pt -> cm
+        CELL_PADDING_CM = 0.15  # внутренние отступы ячейки
+        SAFETY_FACTOR = 1.05  # минимальный запас
+
+        # Кириллица шире латиницы — используем 0.025 вместо 0.022/0.030
+        CHAR_WIDTH_CM = size_pt * 0.025
+
+        max_lines = 1
+        for cell_text in row_data:
+            if not cell_text:
+                continue
+            chars_per_line = max(1, int(col_width_cm / CHAR_WIDTH_CM))
+            lines = 0
+            for paragraph in str(cell_text).split('\n'):
+                lines += max(1, -(-len(paragraph) // chars_per_line))  # ceiling division
+            max_lines = max(max_lines, lines)
+
+        return max_lines * LINE_HEIGHT_CM * DocumentSettings.LINE_SPACING * SAFETY_FACTOR + CELL_PADDING_CM
     def _render_table_block(self, block: TableBlock):
-        """Рендеринг таблицы с разбиением на части при переносе"""
         if not block.rows:
             return
-
-        MAX_ROWS_PER_PAGE = 25  # максимум строк на странице (включая заголовок)
 
         parsed_rows = [split_md_table_row(row) for row in block.rows]
         max_cols = max(len(r) for r in parsed_rows) if parsed_rows else 0
         if max_cols <= 0:
             return
 
-        # Дополняем недостающие ячейки
         for row in parsed_rows:
             if len(row) < max_cols:
                 row.extend([""] * (max_cols - len(row)))
 
-        # Разбиваем таблицу на части (первая часть включает заголовок)
-        chunks = [
-            parsed_rows[i:i + MAX_ROWS_PER_PAGE]
-            for i in range(0, len(parsed_rows), MAX_ROWS_PER_PAGE)
-        ]
-
-        # Ширина колонок
+        # Вычисляем доступную высоту страницы
         sec = self.doc.sections[0]
         usable_width_cm = sec.page_width.cm - sec.left_margin.cm - sec.right_margin.cm
-        col_width = Cm(usable_width_cm / max_cols) if max_cols else Cm(usable_width_cm)
+        PAGE_MARGIN_CM = 0.8  # только колонтитул с номером страницы
+        usable_height_cm = sec.page_height.cm - sec.top_margin.cm - sec.bottom_margin.cm - PAGE_MARGIN_CM
+        col_width_cm = usable_width_cm / max_cols
 
-        # Рендеринг каждой части таблицы
+        CAPTION_HEIGHT_CM = 0.8  # высота строки подписи "Таблица N"
+        HEADER_HEIGHT_CM = self._estimate_row_height_cm(
+            parsed_rows[0], col_width_cm, DocumentSettings.TABLE_FONT_SIZE_PT
+        )
+
+        # Разбиваем на chunks по реальной высоте
+        chunks = []
+        current_chunk = []
+        # Первый chunk: вычитаем высоту подписи + заголовка
+        current_height = CAPTION_HEIGHT_CM + HEADER_HEIGHT_CM
+        header_row = parsed_rows[0]
+
+        for row_data in parsed_rows:
+            row_h = self._estimate_row_height_cm(
+                row_data, col_width_cm, DocumentSettings.TABLE_FONT_SIZE_PT
+            )
+
+            if current_chunk and current_height + row_h > usable_height_cm:
+                chunks.append(current_chunk)
+                current_chunk = [header_row]  # повторяем заголовок в каждом chunk
+                # Следующий chunk: вычитаем высоту подписи "Продолжение" + заголовка
+                current_height = CAPTION_HEIGHT_CM + HEADER_HEIGHT_CM + row_h
+            else:
+                current_height += row_h
+                current_chunk.append(row_data)
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        col_width = Cm(col_width_cm)
+
         for chunk_index, chunk in enumerate(chunks):
-            # --- Подпись над таблицей ---
+            # --- Подпись ---
             cap = self.doc.add_paragraph()
-            cap.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            cap.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             set_paragraph_formatting(
                 cap,
                 first_line_indent=None,
@@ -1320,22 +1361,21 @@ class DocumentRenderer:
                 line_spacing=DocumentSettings.LINE_SPACING
             )
 
-            # Формируем подпись
             if chunk_index == 0:
-                if block.caption:
-                    caption_full = f"Таблица {self.table_counter} — {block.caption}"
-                else:
-                    caption_full = f"Таблица {self.table_counter}"
+                caption_full = (
+                    f"Таблица {self.table_counter} — {block.caption}"
+                    if block.caption
+                    else f"Таблица {self.table_counter}"
+                )
             else:
                 caption_full = f"Продолжение таблицы {self.table_counter}"
 
-            # Применяем форматирование к подписи
             cap.clear()
             for part_text, is_italic in apply_italic_formatting(caption_full):
                 run = cap.add_run(part_text)
                 set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False, italic=is_italic)
 
-            # --- Создаём таблицу ---
+            # --- Таблица ---
             table = self.doc.add_table(rows=len(chunk), cols=max_cols)
             try:
                 table.style = 'Table Grid'
@@ -1344,24 +1384,27 @@ class DocumentRenderer:
             table.alignment = WD_TABLE_ALIGNMENT.LEFT
             table.autofit = False
 
-            # Установка ширины колонок
             for col_idx in range(max_cols):
                 for row in table.rows:
                     row.cells[col_idx].width = col_width
 
-            # Повтор заголовка на каждой части
+            # Повтор заголовка средствами Word (на случай если наша оценка немного ошиблась)
             if chunk:
                 set_repeat_table_header(table.rows[0])
 
             # --- Заполнение ячеек ---
             for r_idx, row_data in enumerate(chunk):
                 row = table.rows[r_idx]
+
+                # Запрет разрыва строки посередине
+                trPr = row._tr.get_or_add_trPr()
+                cantSplit = OxmlElement('w:cantSplit')
+                cantSplit.set(qn('w:val'), '1')
+                trPr.append(cantSplit)
+
                 for c_idx, value in enumerate(row_data):
                     cell = row.cells[c_idx]
-                    # Очищаем ячейку
                     cell.text = ""
-
-                    # Добавляем содержимое
                     for p in cell.paragraphs:
                         p.clear()
 
@@ -1375,24 +1418,24 @@ class DocumentRenderer:
                     p.paragraph_format.line_spacing = DocumentSettings.LINE_SPACING
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER if r_idx == 0 else WD_ALIGN_PARAGRAPH.LEFT
 
-                    # Применяем форматирование текста
                     for part_text, is_italic in apply_italic_formatting(value if value is not None else ""):
                         run = p.add_run(part_text)
-                        set_run_font(run, size_pt=DocumentSettings.TABLE_FONT_SIZE_PT, bold=r_idx == 0, italic=is_italic)
+                        set_run_font(
+                            run,
+                            size_pt=DocumentSettings.TABLE_FONT_SIZE_PT,
+                            bold=r_idx == 0,
+                            italic=is_italic
+                        )
 
                     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
             set_table_borders(table)
 
-            # Разрыв страницы между кусками (кроме последней)
             if chunk_index < len(chunks) - 1:
                 self.doc.add_page_break()
 
-        # Увеличиваем счётчик таблиц после всех частей
         self.table_counter += 1
         self._mark_content()
-
-
 def add_toc(document):
     """Добавление автоматического оглавления (TOC)"""
     paragraph = document.add_paragraph()
