@@ -27,7 +27,42 @@ import subprocess
 import tempfile
 from docx import Document
 from copy import deepcopy
+def reset_heading_styles(doc: Document):
+    """Сбрасывает форматирование стилей Heading 2-9 до нужного вида"""
+    for level in range(2, 10):
+        style_name = f'Heading {level}'
+        try:
+            style = doc.styles[style_name]
+        except KeyError:
+            continue
 
+        # Шрифт
+        style.font.name = DocumentSettings.FONT_NAME
+        style.font.size = Pt(DocumentSettings.FONT_SIZE_PT)
+        style.font.bold = True
+        style.font.italic = False
+        style.font.all_caps = False
+        style.font.small_caps = False
+        style.font.color.rgb = RGBColor(0, 0, 0)
+
+        # Абзац
+        style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        style.paragraph_format.first_line_indent = None
+        style.paragraph_format.left_indent = Cm(0)
+        style.paragraph_format.space_before = Pt(12)
+        style.paragraph_format.space_after = Pt(6)
+        style.paragraph_format.line_spacing = DocumentSettings.LINE_SPACING
+
+        # Сброс caps через XML (на случай если python-docx не перебивает)
+        rPr = style.element.get_or_add_rPr()
+        for tag in ('w:caps', 'w:smallCaps'):
+            el = rPr.find(qn(tag))
+            if el is not None:
+                rPr.remove(el)
+        # Явно выставляем w:caps val=0
+        caps_el = OxmlElement('w:caps')
+        caps_el.set(qn('w:val'), '0')
+        rPr.append(caps_el)
 def convert_inline_math(text: str) -> str:
     """
     Конвертирует inline math $...$ в читаемый текст.
@@ -878,7 +913,7 @@ class MarkdownParser:
 class DocumentRenderer:
     """Рендерер блоков в DOCX"""
 
-    def __init__(self, doc: Document, toc_entries: List[tuple] = None):
+    def __init__(self, doc: Document, toc_entries: List[tuple] = None, use_headings: bool = True):
         self.doc = doc
         self.table_counter = 1
         self.formula_counter = 1  # Счетчик формул
@@ -890,6 +925,7 @@ class DocumentRenderer:
         self.first_h4_seen = False
         self.chapter_num = 0
         self.section_num = 0
+        self.use_headings = use_headings
         self.subsection_num = 0
         self.toc_entries = toc_entries or []
         self._last_was_break = False  # Флаг для защиты от двойных разрывов
@@ -937,6 +973,11 @@ class DocumentRenderer:
                 if section.section_id == "ОГЛАВЛЕНИЕ":
                     # Обычный текст, НЕ Heading (чтобы не попало в TOC)
                     p = self.doc.add_paragraph()
+                    # Явный сброс форматирования стиля
+                    p.style.font.all_caps = False
+                    p.style.font.bold = False
+                    p.paragraph_format.alignment = None  # сбросим до явной установки ниже
+
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
                     run = p.add_run(section.section_id)
@@ -1098,32 +1139,53 @@ class DocumentRenderer:
         self._mark_content()
 
     def _render_heading_block(self, block: HeadingBlock):
-        """Рендеринг заголовка с применением Word стилей"""
-        # Ограничиваем уровень до 9 (максимум для Word)
+        if not self.use_headings:
+            # Рендерим как обычный жирный текст без стиля Heading
+            p = self.doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT if block.level > 1 else WD_ALIGN_PARAGRAPH.CENTER
+            set_paragraph_formatting(p, space_before=12, space_after=6, line_spacing=DocumentSettings.LINE_SPACING)
+            text = block.text.upper() if block.level == 1 else block.text
+            for part_text, is_italic in apply_italic_formatting(text):
+                run = p.add_run(part_text)
+                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
+            self._mark_content()
+            return
+        # ... остальной код метода без изменений
         level = min(block.level, 9)
-
-        # Применяем соответствующий Word стиль
         style_name = f'Heading {level}'
         p = self.doc.add_paragraph(style=style_name)
 
-        # Установка выравнивания в зависимости от уровня
         if level == 1:
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_paragraph_formatting(p, space_before=0, space_after=6)
         else:
-            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
             set_paragraph_formatting(p, space_before=12, space_after=6)
 
-        # Явно устанавливаем outline level для правильной иерархии
-        p.paragraph_format.outline_level = level - 1  # Word использует 0-based уровни
+        p.paragraph_format.outline_level = level - 1
 
-        # Очищаем параграф и добавляем текст с форматированием
+        # Принудительно задаём выравнивание через XML
+        pPr = p._p.get_or_add_pPr()
+        for old in pPr.findall(qn('w:jc')):
+            pPr.remove(old)
+        jc = OxmlElement('w:jc')
+        jc.set(qn('w:val'), 'center' if level == 1 else 'left')
+        pPr.append(jc)
+
+        # Текст: uppercase только для H1
+        text = block.text.upper() if level == 1 else block.text
+
         p.clear()
-        for part_text, is_italic in apply_italic_formatting(
-            block.text.upper() if level == 1 else block.text
-        ):
+        for part_text, is_italic in apply_italic_formatting(text):
             run = p.add_run(part_text)
             set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=True, italic=is_italic)
+            # Принудительно отключаем caps через XML
+            rPr = run._r.get_or_add_rPr()
+            for old in rPr.findall(qn('w:caps')):
+                rPr.remove(old)
+            for old in rPr.findall(qn('w:smallCaps')):
+                rPr.remove(old)
+            caps = OxmlElement('w:caps')
+            caps.set(qn('w:val'), '0')
+            rPr.append(caps)
 
         self._mark_content()
 
@@ -1507,7 +1569,19 @@ def extract_metadata(md_text: str) -> Dict[str, Any]:
     }
 
     # Извлечение флагов
+
+
     prefix = re.escape('[//]:')
+    m_headings = re.search(prefix + r"\s*#\s*use_headings\s*=\s*(true|false)", md_text, re.I)
+    if m_headings:
+        metadata['use_headings'] = m_headings.group(1).lower() != 'false'
+    else:
+        metadata['use_headings'] = True
+    m_numerate = re.search(prefix + r"\s*#\s*numerate\s*=\s*(true|false)", md_text, re.I)
+    if m_numerate:
+        metadata['numerate'] = m_numerate.group(1).lower() != 'false'
+    else:
+        metadata['numerate'] = True  # по умолчанию нумерация включена
     m_flag = re.search(prefix + r"\s*#\s*is_table\s*=\s*(true|false)", md_text, re.I)
     if m_flag:
         metadata['is_table'] = m_flag.group(1).lower() == 'true'
@@ -1568,6 +1642,7 @@ def create_document(md_text: str) -> Document:
     normal.font.size = Pt(DocumentSettings.FONT_SIZE_PT)
     normal.paragraph_format.first_line_indent = Cm(DocumentSettings.FIRST_LINE_INDENT_CM)
     normal.paragraph_format.line_spacing = DocumentSettings.LINE_SPACING
+    reset_heading_styles(doc)
 
     # Блок ФИО (если не таблица)
     if not metadata['is_table'] and (metadata['fio'] or metadata['group']):
@@ -1597,7 +1672,7 @@ def create_document(md_text: str) -> Document:
         collect_headings(block)
 
     # Рендеринг
-    renderer = DocumentRenderer(doc, toc_entries)
+    renderer = DocumentRenderer(doc, toc_entries, use_headings=metadata['use_headings'])
     for block in blocks:
         renderer.render_block(block)
 
@@ -1652,7 +1727,9 @@ def create_document(md_text: str) -> Document:
         set_table_borders(table)
 
     # Номера страниц
-    add_page_number_centered(doc)
+    # Номера страниц
+    if metadata['numerate']:
+        add_page_number_centered(doc)
 
     return doc
 
