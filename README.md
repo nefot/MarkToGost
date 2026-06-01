@@ -1,15 +1,15 @@
 # MarkToGost — Структура и использование
 
-## 📁 Структура папок
+##  Структура папок
 
 ```
 MarkToGost/
-├── input/                   # 📥 Входные Markdown файлы
+├── input/                   #  Входные Markdown файлы
 │   ├── Kursovaya.md
 │   ├── test.md
 │   └── философия.md
 │
-├── output/                  # 📤 Результаты конвертации (DOCX файлы)
+├── output/                  #  Результаты конвертации (DOCX файлы)
 │
 ├── MarkToGost/             # Основной пакет
 │   ├── main.py             # Точка входа
@@ -22,7 +22,7 @@ MarkToGost/
 └── ARCHITECTURE.md         # Документация архитектуры
 ```
 
-## 🚀 Использование
+##  Использование
 
 ### 1️⃣ Обработать ВСЕ файлы из папки `input/`
 
@@ -34,15 +34,15 @@ python -m MarkToGost.main
 
 **Вывод:**
 ```
-📂 Папка входных файлов: C:\...\MarkToGost\input
-📂 Папка для сохранения: C:\...\MarkToGost\output
-🔍 Найдено файлов: 3
+ Папка входных файлов: C:\...\MarkToGost\input
+ Папка для сохранения: C:\...\MarkToGost\output
+ Найдено файлов: 3
 
 ✅ input\Kursovaya.md → output\Kursovaya.docx
 ✅ input\test.md → output\test.docx
 ✅ input\философия.md → output\философия.docx
 
-🎉 Обработано: 3/3 файлов
+ Обработано: 3/3 файлов
 ```
 
 ### 2️⃣ Обработать конкретный файл
@@ -67,7 +67,7 @@ python -m MarkToGost.main Kursovaya.md --output Моя_курсовая.docx
 python -m MarkToGost.main --help
 ```
 
-## 📋 Рабочий процесс
+##  Рабочий процесс
 
 1. **Поместите** ваши Markdown файлы в папку **`input/`**
    ```bash
@@ -88,7 +88,7 @@ python -m MarkToGost.main --help
    # my_document.docx  ← готовый документ по ГОСТ
    ```
 
-## 🧪 Запуск тестов
+##  Запуск тестов
 
 ```bash
 # Все тесты
@@ -98,14 +98,14 @@ pytest MarkToGost/tests/ -v
 pytest MarkToGost/tests/test_formatting.py::TestApplyItalicFormatting -v
 ```
 
-## 📝 Примечания
+##  Примечания
 
 - ✅ **Входные файлы** остаются в `input/` без изменений
 - ✅ **Выходные файлы** создаются в `output/` с номерами страниц
 - ✅ **Поддерживаются** все элементы Markdown: таблицы, формулы, изображения, списки, коды
 - ✅ **ГОСТ 7.32-2001** — все требования соблюдены (шрифт, отступы, нумерация и т.д.)
 
-## 🔧 Программный API
+##  Программный API
 
 Если вы хотите использовать в своем коде:
 
