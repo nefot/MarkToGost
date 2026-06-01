@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
-
+from formula_renderer import add_formula_paragraph, extract_omml
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1026,7 +1026,13 @@ class DocumentRenderer:
         # 🔹 ВСЕГДА завершаем раздел разрывом страницы
         self._safe_page_break()
 
-    def _render_formula_block(self, block: FormulaBlock):
+    def _render_formula_block(self, block):
+        """
+        Рендеринг блочной формулы с номером по ГОСТ.
+
+        Использует нативный OMML через pandoc — формулы редактируемы
+        в редакторе формул Word, не требуют внешних шрифтов.
+        """
         # --- Нумерация ---
         if not block.number:
             block.number = str(self.formula_counter)
@@ -1035,61 +1041,23 @@ class DocumentRenderer:
         if block.formula_id:
             self.formula_refs[block.formula_id] = block.number
 
-        # --- Получаем формулу через Pandoc ---
-        formula_doc = render_formula_with_pandoc(block.latex)
+        # --- Вставка формулы ---
+        # add_formula_paragraph сам решает: OMML если pandoc есть, текст если нет
+        from formula_renderer import add_formula_paragraph
+        add_formula_paragraph(
+            self.doc,
+            latex=block.latex,
+            number=block.number,
+            font_size_pt=DocumentSettings.FONT_SIZE_PT,
+        )
 
-        # --- Создаём таблицу 1x2 ---
-        table = self.doc.add_table(rows=1, cols=2)
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER
-        table.autofit = False
-
-        # ширины колонок
-        sec = self.doc.sections[0]
-        usable_width = sec.page_width.cm - sec.left_margin.cm - sec.right_margin.cm
-
-        table.columns[0].width = Cm(usable_width * 0.85)
-        table.columns[1].width = Cm(usable_width * 0.15)
-
-        # --- Левая ячейка (формула) ---
-        left_cell = table.cell(0, 0)
-        left_cell.text = ""
-
-        # вставляем формулу внутрь ячейки
-        for el in formula_doc.element.body:
-            left_cell._element.append(deepcopy(el))
-
-        for p in left_cell.paragraphs:
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        # --- Правая ячейка (номер) ---
-        right_cell = table.cell(0, 1)
-        right_cell.text = ""
-
-        p = right_cell.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-        run = p.add_run(f"({block.number})")
-        set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT)
-
-        # --- Убираем границы таблицы ---
-        tbl = table._tbl
-        tblPr = tbl.tblPr
-
-        borders = OxmlElement('w:tblBorders')
-        for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
-            el = OxmlElement(f'w:{edge}')
-            el.set(qn('w:val'), 'nil')
-            borders.append(el)
-
-        tblPr.append(borders)
-
-        # --- Пояснение ---
+        # --- Пояснение (где ...) ---
         if block.explanation:
-            lines = block.explanation.strip().split('\\n')
-            for raw_line in lines:
+            for raw_line in block.explanation.strip().split('\\n'):
                 raw_line = raw_line.strip()
                 if not raw_line:
                     continue
+
                 line_text = convert_inline_math(raw_line)
                 exp_p = self.doc.add_paragraph()
                 set_paragraph_formatting(
@@ -1098,24 +1066,13 @@ class DocumentRenderer:
                     first_line_indent=Cm(DocumentSettings.FIRST_LINE_INDENT_CM),
                     line_spacing=DocumentSettings.LINE_SPACING,
                     space_before=0,
-                    space_after=0
+                    space_after=0,
                 )
                 run = exp_p.add_run(line_text)
                 set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT)
 
-        self.doc.add_paragraph()
+        self.doc.add_paragraph()  # отступ после формулы
         self._mark_content()
-    def _render_formula(self, latex: str):
-        """Старый метод для совместимости (упрощенный рендеринг)"""
-        p = self.doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        try:
-            omml = latex_to_omml(latex)
-            p._p.append(omml)
-        except:
-            run = p.add_run(f"${latex}$")
-            set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT)
 
     def _render_text_block(self, block: TextBlock):
         """Рендеринг текстового блока с заменой ссылок на изображения"""
