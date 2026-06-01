@@ -1033,6 +1033,8 @@ class DocumentRenderer:
         Использует нативный OMML через pandoc — формулы редактируемы
         в редакторе формул Word, не требуют внешних шрифтов.
         """
+        from formula_renderer import add_formula_paragraph, add_paragraph_with_inline_formulas
+
         # --- Нумерация ---
         if not block.number:
             block.number = str(self.formula_counter)
@@ -1042,8 +1044,6 @@ class DocumentRenderer:
             self.formula_refs[block.formula_id] = block.number
 
         # --- Вставка формулы ---
-        # add_formula_paragraph сам решает: OMML если pandoc есть, текст если нет
-        from formula_renderer import add_formula_paragraph
         add_formula_paragraph(
             self.doc,
             latex=block.latex,
@@ -1058,18 +1058,13 @@ class DocumentRenderer:
                 if not raw_line:
                     continue
 
-                line_text = convert_inline_math(raw_line)
-                exp_p = self.doc.add_paragraph()
-                set_paragraph_formatting(
-                    exp_p,
+                add_paragraph_with_inline_formulas(
+                    self.doc,
+                    text=raw_line,
                     align=WD_ALIGN_PARAGRAPH.LEFT,
-                    first_line_indent=Cm(DocumentSettings.FIRST_LINE_INDENT_CM),
-                    line_spacing=DocumentSettings.LINE_SPACING,
-                    space_before=0,
-                    space_after=0,
+                    first_line_indent_cm=DocumentSettings.FIRST_LINE_INDENT_CM,
+                    font_size_pt=DocumentSettings.FONT_SIZE_PT,
                 )
-                run = exp_p.add_run(line_text)
-                set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT)
 
         self.doc.add_paragraph()  # отступ после формулы
         self._mark_content()
