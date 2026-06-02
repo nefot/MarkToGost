@@ -51,29 +51,20 @@ def set_run_font(run, size_pt: int = 14, bold: bool = False, italic: bool = Fals
 
 
 def set_paragraph_formatting(paragraph, *,
-                              align=None,
-                              first_line_indent=None,
-                              left_indent=None,
-                              line_spacing: float = 1.25,
-                              space_before: float = 0,
-                              space_after: float = 0):
-    """
-    Устанавливает форматирование абзаца.
-
-    Параметры:
-        align               — WD_ALIGN_PARAGRAPH.*
-        first_line_indent   — Cm(...) или None
-        left_indent         — Cm(...) или None
-        line_spacing        — множитель межстрочного интервала
-        space_before        — отступ до абзаца в pt
-        space_after         — отступ после абзаца в pt
-    """
+                             align=None,
+                             first_line_indent=None,
+                             left_indent=None,
+                             line_spacing: float = 1.25,
+                             space_before: float = 0,
+                             space_after: float = 0):
     if align is not None:
         paragraph.alignment = align
 
     pf = paragraph.paragraph_format
-    if first_line_indent is not None:
-        pf.first_line_indent = first_line_indent
+    # Было: if first_line_indent is not None: pf.first_line_indent = first_line_indent
+    # Стало: явно сбрасываем в 0 если None
+    pf.first_line_indent = first_line_indent if first_line_indent is not None else Cm(0)
+
     if left_indent is not None:
         pf.left_indent = left_indent
 

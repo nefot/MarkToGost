@@ -26,10 +26,10 @@ class DocumentSettings:
     # Настройки подписей
     CAPTION_FONT_SIZE_PT = 12
     CAPTION_ITALIC = True
+    USE_FIRST_LINE_INDENT = True  # False — без отступа
 
     # Настройки таблиц
     TABLE_FONT_SIZE_PT = 12
-
 
 class CaptionSettings:
     """Настройки подписей к элементам"""
@@ -43,3 +43,4 @@ class TextSettings:
     FONT_SIZE = Pt(14)
     LINE_SPACING = 1.5
     FIRST_LINE_INDENT = Cm(1.25)
+

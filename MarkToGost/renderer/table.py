@@ -1,11 +1,12 @@
 """Рендеринг таблиц"""
+import re
 
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
-
+from MarkToGost.formula_renderer import add_inline_formula
 from MarkToGost.config import DocumentSettings
 from MarkToGost.parser.blocks import TableBlock
 from MarkToGost.utils.formatting import apply_italic_formatting, set_run_font, set_paragraph_formatting
@@ -157,14 +158,23 @@ def render_table_block(renderer, block: TableBlock):
                 p.paragraph_format.line_spacing = DocumentSettings.LINE_SPACING
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER if r_idx == 0 else WD_ALIGN_PARAGRAPH.LEFT
 
-                for part_text, is_italic in apply_italic_formatting(value if value is not None else ""):
-                    run = p.add_run(part_text)
-                    set_run_font(
-                        run,
-                        size_pt=DocumentSettings.TABLE_FONT_SIZE_PT,
-                        bold=r_idx == 0,
-                        italic=is_italic
-                    )
+                cell_text = value if value is not None else ""
+                parts = re.split(r'\$(.+?)\$', cell_text)
+
+                for i, part in enumerate(parts):
+                    if i % 2 == 0:
+                        # Обычный текст
+                        for part_text, is_italic in apply_italic_formatting(part):
+                            run = p.add_run(part_text)
+                            set_run_font(
+                                run,
+                                size_pt=DocumentSettings.TABLE_FONT_SIZE_PT,
+                                bold=r_idx == 0,
+                                italic=is_italic
+                            )
+                    else:
+                        # Inline-формула $...$
+                        add_inline_formula(p, part)
 
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 

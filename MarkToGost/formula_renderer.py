@@ -163,7 +163,9 @@ def add_inline_formula(paragraph, latex: str) -> bool:
 
     Возвращает True если успешно, False если fallback (текст).
     """
+    # print(f"[inline_formula] latex: {repr(latex)}")  # временно
     omml_nodes = extract_omml(latex)
+    # print(f"[inline_formula] result: {omml_nodes}")
     if omml_nodes:
         for node in omml_nodes:
             paragraph._p.append(deepcopy(node))

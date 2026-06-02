@@ -34,7 +34,6 @@ from MarkToGost.utils.toc import (
 from MarkToGost.utils.formatting import set_run_font, set_paragraph_formatting
 from MarkToGost.utils.xml_helpers import add_page_number_centered
 
-
 # Структура папок
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # BASE_DIR это папка MarkToGost (содержит MarkToGost/main.py, MarkToGost/config.py и др.)
@@ -44,6 +43,29 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 # Создаем папки если их нет
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def apply_cli_overrides(args, settings):
+    """Применяет CLI-аргументы к DocumentSettings"""
+    mapping = {
+        'font_name': 'FONT_NAME',
+        'font_size': 'FONT_SIZE_PT',
+        'line_spacing': 'LINE_SPACING',
+        'first_line_indent': 'FIRST_LINE_INDENT_CM',
+        'left_margin': 'LEFT_MARGIN_CM',
+        'right_margin': 'RIGHT_MARGIN_CM',
+        'top_margin': 'TOP_MARGIN_CM',
+        'bottom_margin': 'BOTTOM_MARGIN_CM',
+        'image_width': 'IMAGE_WIDTH_FRACTION',
+        'caption_font_size': 'CAPTION_FONT_SIZE_PT',
+        'caption_italic': 'CAPTION_ITALIC',
+        'table_font_size': 'TABLE_FONT_SIZE_PT',
+        'use_first_line_indent': 'USE_FIRST_LINE_INDENT',
+    }
+    for arg_name, setting_name in mapping.items():
+        value = getattr(args, arg_name, None)
+        if value is not None:
+            setattr(settings, setting_name, value)
 
 
 def create_document(md_text: str) -> Document:
@@ -187,12 +209,12 @@ def process_md_file(input_path: str, output_path: Optional[str] = None) -> bool:
         input_full_path = os.path.join(INPUT_DIR, input_path)
     else:
         input_full_path = input_path
-    
+
     # Проверяем что файл существует
     if not os.path.exists(input_full_path):
         print(f"❌ Файл не найден: {input_full_path}")
         return False
-    
+
     # Определяем путь выхода
     if output_path is None:
         filename = os.path.basename(input_full_path)
@@ -212,12 +234,12 @@ def process_md_file(input_path: str, output_path: Optional[str] = None) -> bool:
 
         doc = create_document(md_text)
         doc.save(output_full_path)
-        
+
         rel_input = os.path.relpath(input_full_path, PROJECT_ROOT)
         rel_output = os.path.relpath(output_full_path, PROJECT_ROOT)
         print(f"✅ {rel_input} → {rel_output}")
         return True
-        
+
     except Exception as e:
         print(f"❌ Ошибка при обработке {os.path.basename(input_full_path)}: {e}")
         import traceback
@@ -230,47 +252,81 @@ if __name__ == "__main__":
         description="MarkToGost: Конвертер Markdown → DOCX по ГОСТ 7.32-2001",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Примеры использования:
-  python -m MarkToGost.main
-        Обработает все .md файлы из папки 'input/'
+        Примеры использования:
+          python -m MarkToGost.main
+                Обработает все .md файлы из папки 'input/'
         
-  python -m MarkToGost.main file.md
-        Обработает конкретный файл 'input/file.md'
+          python -m MarkToGost.main file.md
+                Обработает конкретный файл 'input/file.md'
         
-  python -m MarkToGost.main file.md --output custom_output.docx
-        Обработает 'input/file.md' и сохранит результат как 'output/custom_output.docx'
+          python -m MarkToGost.main file.md --output custom_output.docx
+                Обработает 'input/file.md' и сохранит результат как 'output/custom_output.docx'
         
-Структура папок:
-  input/      - входные Markdown файлы
-  output/     - результаты конвертации (DOCX файлы)
+          python -m MarkToGost.main file.md --font-size 12 --left-margin 2.5
+                Обработает файл с нестандартными параметрами документа
+        
+        Структура папок:
+          input/      - входные Markdown файлы
+          output/     - результаты конвертации (DOCX файлы)
         """
     )
-    
+
     parser.add_argument(
         "file",
         nargs="?",
         default=None,
         help="Конкретный MD файл для обработки (из папки input/)"
     )
-    
+
     parser.add_argument(
         "--output", "-o",
         default=None,
         help="Имя выходного DOCX файла (будет сохранен в папку output/)"
     )
-    
+
+    # --- Настройки документа ---
+    doc_group = parser.add_argument_group('Настройки документа')
+    doc_group.add_argument('--font-name', default=None, help=f'Шрифт (по умол.: {DocumentSettings.FONT_NAME})')
+    doc_group.add_argument('--font-size', default=None, type=float,
+                           help=f'Размер шрифта в pt (по умол.: {DocumentSettings.FONT_SIZE_PT})')
+    doc_group.add_argument('--line-spacing', default=None, type=float,
+                           help=f'Межстрочный интервал (по умол.: {DocumentSettings.LINE_SPACING})')
+    doc_group.add_argument('--first-line-indent', default=None, type=float,
+                           help=f'Отступ первой строки в см (по умол.: {DocumentSettings.FIRST_LINE_INDENT_CM})')
+    doc_group.add_argument('--left-margin', default=None, type=float,
+                           help=f'Левое поле в см (по умол.: {DocumentSettings.LEFT_MARGIN_CM})')
+    doc_group.add_argument('--right-margin', default=None, type=float,
+                           help=f'Правое поле в см (по умол.: {DocumentSettings.RIGHT_MARGIN_CM})')
+    doc_group.add_argument('--top-margin', default=None, type=float,
+                           help=f'Верхнее поле в см (по умол.: {DocumentSettings.TOP_MARGIN_CM})')
+    doc_group.add_argument('--bottom-margin', default=None, type=float,
+                           help=f'Нижнее поле в см (по умол.: {DocumentSettings.BOTTOM_MARGIN_CM})')
+    doc_group.add_argument('--image-width', default=None, type=float,
+                           help=f'Ширина изображений — доля от страницы (по умол.: {DocumentSettings.IMAGE_WIDTH_FRACTION})')
+    doc_group.add_argument('--caption-font-size', default=None, type=float,
+                           help=f'Размер шрифта подписей в pt (по умол.: {DocumentSettings.CAPTION_FONT_SIZE_PT})')
+    doc_group.add_argument('--caption-italic', default=None, type=lambda x: x.lower() == 'true',
+                           help=f'Курсив подписей: true/false (по умол.: {DocumentSettings.CAPTION_ITALIC})')
+    doc_group.add_argument('--table-font-size', default=None, type=float,
+                           help=f'Размер шрифта таблиц в pt (по умол.: {DocumentSettings.TABLE_FONT_SIZE_PT})')
+    doc_group.add_argument('--use-first-line-indent', default=None, type=lambda x: x.lower() == 'true',
+                           help=f'Красная строка: true/false (по умол.: {DocumentSettings.USE_FIRST_LINE_INDENT})')
+
     args = parser.parse_args()
-    
+
+    # Применяем CLI-параметры к конфигу ДО обработки файлов
+    apply_cli_overrides(args, DocumentSettings)
+
     # Если указан конкретный файл
     if args.file:
         print(f"📄 Обработка файла: {args.file}")
         success = process_md_file(args.file, args.output)
         sys.exit(0 if success else 1)
-    
+
     # Иначе обрабатываем все файлы из input/
     print(f"📂 Папка входных файлов: {INPUT_DIR}")
     print(f"📂 Папка для сохранения: {OUTPUT_DIR}")
-    
+
     all_md = [
         f for f in os.listdir(INPUT_DIR)
         if f.lower().endswith(".md") and not f.startswith(".")
@@ -279,18 +335,13 @@ if __name__ == "__main__":
     if not all_md:
         print(f"⚠️ Не найдено ни одного Markdown-файла в {INPUT_DIR}")
         sys.exit(1)
-    
+
     print(f"🔍 Найдено файлов: {len(all_md)}\n")
-    
+
     success_count = 0
     for file in all_md:
         if process_md_file(os.path.join(INPUT_DIR, file)):
             success_count += 1
-    
+
     print(f"\n🎉 Обработано: {success_count}/{len(all_md)} файлов")
     sys.exit(0 if success_count == len(all_md) else 1)
-
-
-
-
-

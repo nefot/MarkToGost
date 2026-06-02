@@ -21,7 +21,7 @@ def render_text_block(renderer, block: TextBlock):
     set_paragraph_formatting(
         p,
         align=WD_ALIGN_PARAGRAPH.JUSTIFY,
-        first_line_indent=Cm(DocumentSettings.FIRST_LINE_INDENT_CM),
+        first_line_indent=Cm(DocumentSettings.FIRST_LINE_INDENT_CM) if DocumentSettings.USE_FIRST_LINE_INDENT else None,
         line_spacing=DocumentSettings.LINE_SPACING
     )
 

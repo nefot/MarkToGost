@@ -39,7 +39,6 @@ def replace_image_refs(text: str, image_refs: Dict[str, int]) -> str:
 
     return result
 
-
 def split_md_table_row(line: str) -> list:
     """Разбор строки markdown-таблицы"""
     s = line.strip()
@@ -50,21 +49,20 @@ def split_md_table_row(line: str) -> list:
 
     cells = []
     buf = []
-    escape = False
-
-    for ch in s:
-        if escape:
-            buf.append(ch)
-            escape = False
-            continue
-        if ch == '\\':
-            escape = True
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        # Экранированный пайп \| — не разделитель
+        if ch == '\\' and i + 1 < len(s) and s[i + 1] == '|':
+            buf.append('\\|')
+            i += 2
             continue
         if ch == '|':
             cells.append(''.join(buf).strip())
             buf = []
-            continue
-        buf.append(ch)
+        else:
+            buf.append(ch)
+        i += 1
 
     cells.append(''.join(buf).strip())
     return cells

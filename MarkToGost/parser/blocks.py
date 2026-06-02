@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, List
+from enum import Enum
 
 
 @dataclass
@@ -12,6 +13,35 @@ class BaseBlock:
 class TextBlock(BaseBlock):
     """Блок обычного текста"""
     text: str
+
+
+class CellAlign(Enum):
+    LEFT = "left"
+    CENTER = "center"
+    RIGHT = "right"
+
+
+@dataclass
+class HtmlTableCell:
+    text: str
+    colspan: int = 1
+    rowspan: int = 1
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    align: CellAlign = CellAlign.LEFT
+    formula: Optional[str] = None  # LaTeX формула
+
+@dataclass
+class HtmlTableRow:
+    cells: List['HtmlTableCell']
+
+
+@dataclass
+class HtmlTableBlock(BaseBlock):
+    rows: List['HtmlTableRow']
+    caption: Optional[str] = None
+    transparent: bool = False  # Скрыть границы таблицы
 
 
 @dataclass

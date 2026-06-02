@@ -4,7 +4,11 @@ from MarkToGost.parser.blocks import *
 from MarkToGost.utils.document_helpers import (
     is_md_table_row, is_md_table_separator, split_md_table_row, normalize_table_caption
 )
+from MarkToGost.utils.html_table_parser import parse_html_table
 from MarkToGost.utils.toc import get_heading_level_from_number
+# Импорт в начале файла
+from html.parser import HTMLParser
+from MarkToGost.parser.blocks import HtmlTableBlock, HtmlTableRow, HtmlTableCell
 
 
 class MarkdownParser:
@@ -39,6 +43,9 @@ class MarkdownParser:
                 blocks.append(self._parse_list())
             elif self._is_code_block_start(line):
                 blocks.append(self._parse_code_block())
+            elif self._is_html_table_start(line):
+                blocks.append(self._parse_html_table())
+
             else:
                 blocks.append(self._parse_text_block())
 
@@ -391,3 +398,17 @@ class MarkdownParser:
             self.index += 1
 
         return TextBlock(text=" ".join(buffer))
+
+    def _is_html_table_start(self, line: str) -> bool:
+        return line.strip().lower().startswith('<table')
+
+    def _parse_html_table(self) -> HtmlTableBlock:
+        html_lines = []
+        while self.index < len(self.lines):
+            l = self.lines[self.index]
+            html_lines.append(l)
+            self.index += 1
+            if '</table>' in l.lower():
+                break
+        return parse_html_table('\n'.join(html_lines))
+# За пределами класса MarkdownParser (в том же файле):

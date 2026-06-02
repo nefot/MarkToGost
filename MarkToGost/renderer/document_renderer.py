@@ -18,6 +18,8 @@ from MarkToGost.renderer.Section import render_section_block
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+from MarkToGost.parser.blocks import HtmlTableBlock
+from MarkToGost.renderer.html_table import render_html_table_block
 
 class DocumentRenderer:
     """Рендерер блоков в DOCX — главный диспетчер"""
@@ -44,6 +46,7 @@ class DocumentRenderer:
             TableBlock: render_table_block,
             CodeBlock: render_code_block,
             FormulaBlock: render_formula_block,
+            HtmlTableBlock: render_html_table_block,
         }
 
     def _is_document_start(self) -> bool:
