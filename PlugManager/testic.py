@@ -18,9 +18,9 @@ import psycopg2
 # --- Настройки подключения по умолчанию ---
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 5432
-DEFAULT_DB   = "postgres"
+DEFAULT_DB   = "Plugs"
 DEFAULT_USER = "postgres"
-DEFAULT_PASS = ""
+DEFAULT_PASS = "postgres"
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "input")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -169,7 +169,7 @@ def build_md(data: dict) -> str:
     lines.append('        <td colspan="4" align="center" bold>Круглые</td>')
     lines.append("    </tr>")
     lines.append("    <tr>")
-    lines.append('        <td colspan="3" bold>Внутренние</td>')
+    lines.append('        <td colspan="3" align="center" bold>Внутренние</td>')
     lines.append("        <td bold>Наружные</td>")
     lines.append("    </tr>")
 

@@ -9,13 +9,32 @@ from MarkToGost.utils.document_helpers import compute_image_width_cm
 from MarkToGost.utils.formatting import apply_italic_formatting, set_run_font, set_paragraph_formatting
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+INPUT_DIR = os.path.join(PROJECT_ROOT, "input")
 
 
 def render_image_block(renderer, block: ImageBlock):
     """Рендеринг изображения"""
     img_path = block.path
+
+    # Когда указан относительный путь — пробуем несколько мест в проекте (пакет, input/, корень проекта)
     if not os.path.isabs(img_path):
-        img_path = os.path.join(BASE_DIR, block.path)
+        candidates = [
+            os.path.join(BASE_DIR, block.path),      # относительно пакета MarkToGost/
+            os.path.join(INPUT_DIR, block.path),     # относительно input/
+            os.path.join(PROJECT_ROOT, block.path),  # относительно корня проекта
+            block.path                               # как есть (относительно cwd)
+        ]
+        found = None
+        for p in candidates:
+            if os.path.exists(p):
+                found = p
+                break
+        if found:
+            img_path = found
+        else:
+            # Оставляем первый вариант для сообщения об ошибке
+            img_path = candidates[0]
 
     if os.path.exists(img_path):
         # Изображение
