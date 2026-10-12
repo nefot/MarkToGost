@@ -87,7 +87,13 @@ def get_heading_level_from_number(text: str) -> int:
     1.1 → 2
     1.1.1 → 3
     """
-    match = re.match(r'^(\d+(?:\.\d+)*)', text.strip())
+    text = text.strip()
+    # Подраздел приложения: «А.1», «Б.2.3» — буква приложения считается первым уровнем
+    appendix = re.match(r'^[A-ZА-ЯЁ]\.(\d+(?:\.\d+)*)(?:\s|$)', text)
+    if appendix:
+        return min(appendix.group(1).count('.') + 2, 9)
+
+    match = re.match(r'^(\d+(?:\.\d+)*)', text)
     if not match:
         return 1  # если нет номера — считаем верхним уровнем
 

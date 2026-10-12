@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Рабочие документы и результаты конвертации
+input/
+output/
+КУРСОВАЯ/
+
+# Временные файлы Word и секреты
+~$*
+.env
+
+# Личные данные для титульных листов (пример — examples/marktogost.yaml)
+/marktogost.yaml

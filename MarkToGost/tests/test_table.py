@@ -65,6 +65,11 @@ class TestRenderTable:
         assert caption.paragraph_format.keep_with_next is True
         assert renderer.table_counter == 2
 
+    def test_table_without_caption_not_numbered(self):
+        doc, renderer = self.render(["| Заказчик | Исполнитель |", "| ООО «А» | ИП Б |"], caption=None)
+        assert not any(p.text.startswith("Таблица") for p in doc.paragraphs)
+        assert renderer.table_counter == 1
+
     def test_header_row_repeats(self):
         doc, _ = self.render(["| A | B |", "| 1 | 2 |"])
         tr_pr = doc.tables[0].rows[0]._tr.trPr

@@ -84,25 +84,24 @@ def render_table_block(renderer, block: TableBlock):
     widths = _column_widths_cm(parsed_rows, usable_width_cm, font_pt)
 
     # --- Подпись ---
-    cap = renderer.doc.add_paragraph()
-    cap.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    set_paragraph_formatting(
-        cap,
-        first_line_indent=None,
-        left_indent=Cm(0),
-        space_before=6,
-        space_after=0,
-        line_spacing=DocumentSettings.LINE_SPACING
-    )
-    cap.paragraph_format.keep_with_next = True
-    caption_full = (
-        f"Таблица {renderer.table_counter} — {block.caption}"
-        if block.caption
-        else f"Таблица {renderer.table_counter}"
-    )
-    for part_text, is_italic in apply_italic_formatting(caption_full):
-        run = cap.add_run(part_text)
-        set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False, italic=is_italic)
+    # Таблица без подписи (реквизиты договора, прайс-лист) выводится без номера и не сдвигает нумерацию
+    numbered = bool(block.caption)
+    if numbered:
+        cap = renderer.doc.add_paragraph()
+        cap.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        set_paragraph_formatting(
+            cap,
+            first_line_indent=None,
+            left_indent=Cm(0),
+            space_before=6,
+            space_after=0,
+            line_spacing=DocumentSettings.LINE_SPACING
+        )
+        cap.paragraph_format.keep_with_next = True
+        caption_full = f"Таблица {renderer.table_counter} — {block.caption}"
+        for part_text, is_italic in apply_italic_formatting(caption_full):
+            run = cap.add_run(part_text)
+            set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False, italic=is_italic)
 
     # --- Таблица ---
     table = renderer.doc.add_table(rows=len(parsed_rows), cols=max_cols)
@@ -172,6 +171,7 @@ def render_table_block(renderer, block: TableBlock):
 
     set_table_borders(table)
 
-    renderer.table_counter += 1
+    if numbered:
+        renderer.table_counter += 1
     renderer._mark_content()
 

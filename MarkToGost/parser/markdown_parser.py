@@ -11,6 +11,11 @@ from html.parser import HTMLParser
 from MarkToGost.parser.blocks import HtmlTableBlock, HtmlTableRow, HtmlTableCell
 
 
+TOC_TITLES = {"ОГЛАВЛЕНИЕ", "СОДЕРЖАНИЕ"}
+# Вставной лист в тексте: {{лист: путь/шаблон.docx}} или {{лист: шаблон.docx | без номера}}
+SHEET_LINE = re.compile(r'^\{\{\s*лист\s*:\s*([^|}]+?)\s*(?:\|\s*([^}]*?)\s*)?\}\}$', re.I)
+
+
 class MarkdownParser:
     """Парсер Markdown в блоки"""
 
@@ -29,7 +34,9 @@ class MarkdownParser:
                 self.index += 1
                 continue
 
-            if self._is_section_start(line):
+            if self._is_sheet(line):
+                blocks.append(self._parse_sheet(line))
+            elif self._is_section_start(line):
                 blocks.append(self._parse_section())
             elif self._is_formula_block(line):
                 blocks.append(self._parse_formula_block())
@@ -52,6 +59,15 @@ class MarkdownParser:
                 blocks.append(self._parse_text_block())
 
         return blocks
+
+    def _is_sheet(self, line: str) -> bool:
+        return bool(SHEET_LINE.match(line))
+
+    def _parse_sheet(self, line: str) -> SheetBlock:
+        match = SHEET_LINE.match(line)
+        options = (match.group(2) or "").lower()
+        self.index += 1
+        return SheetBlock(template=match.group(1), page_numbers="без номера" not in options)
 
     def _is_heading(self, line: str) -> bool:
         return line.startswith("#")
@@ -168,12 +184,14 @@ class MarkdownParser:
 
         if has_content:
             # Раздел с блоками: [//]: #### (ID)[params] { ... }
-            return self._parse_section_with_braces(section_id, heading_level, add_page_breaks)
+            section = self._parse_section_with_braces(section_id, heading_level, add_page_breaks)
         else:
             # Раздел без блоков: [//]: #### (ID)[params]
             self.index += 1
-            return Section(section_id=section_id, blocks=[], heading_level=heading_level,
-                           add_page_breaks=add_page_breaks)
+            section = Section(section_id=section_id, blocks=[], heading_level=heading_level,
+                              add_page_breaks=add_page_breaks)
+        section.toc = section_id.strip().upper() in TOC_TITLES
+        return section
 
     def _parse_section_with_braces(self, section_id: str, heading_level: int, add_page_breaks: bool) -> Section:
         """Парсинг раздела с фигурными скобками [//]: #### (ID)[params] { ... }"""
@@ -225,7 +243,9 @@ class MarkdownParser:
                 continue
 
             # Парсим блоки внутри раздела
-            if self._is_heading(line):
+            if self._is_sheet(line):
+                section_blocks.append(self._parse_sheet(line))
+            elif self._is_heading(line):
                 section_blocks.append(self._parse_heading(line))
             elif self._is_formula_block(line):
                 section_blocks.append(self._parse_formula_block())
@@ -285,10 +305,11 @@ class MarkdownParser:
         return line.startswith("```")
 
     def _parse_heading(self, line: str) -> HeadingBlock:
+        marker = len(line) - len(line.lstrip('#'))
         text = line.lstrip('#').strip()
         level = get_heading_level_from_number(text)
         self.index += 1
-        return HeadingBlock(text=text, level=level)
+        return HeadingBlock(text=text, level=level, marker=marker)
 
     def _parse_image(self, line: str) -> ImageBlock:
         # Поддержка формата: ![caption](path){#id landscape}
@@ -393,7 +414,7 @@ class MarkdownParser:
                 break
             if self._is_table_start() or self._is_list_start() or self._is_table_caption():
                 break
-            if self._is_section_start(line):
+            if self._is_section_start(line) or self._is_sheet(line):
                 break
 
             buffer.append(line)

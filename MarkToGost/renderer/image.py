@@ -12,6 +12,7 @@ from docx.shared import Cm
 
 from MarkToGost.config import DocumentSettings
 from MarkToGost.parser.blocks import ImageBlock
+from MarkToGost.utils.xml_helpers import end_section_here
 from MarkToGost.utils.drawio import is_drawio_path, split_drawio_path, export_drawio
 from MarkToGost.utils.formatting import apply_italic_formatting, set_run_font, set_paragraph_formatting
 
@@ -27,11 +28,7 @@ def _start_section(renderer, landscape: bool):
     """Завершает текущий раздел DOCX и начинает новый с нужной ориентацией страницы"""
     body = renderer.doc.element.body
     body_sectPr = body.sectPr
-    ended = deepcopy(body_sectPr)  # свойства завершаемого раздела
-    last = body_sectPr.getprevious()
-    if last is None or last.tag != qn('w:p') or last.find(qn('w:pPr') + '/' + qn('w:sectPr')) is not None:
-        last = renderer.doc.add_paragraph()._p
-    last.get_or_add_pPr().append(ended)
+    end_section_here(body, deepcopy(body_sectPr))  # свойства завершаемого раздела
 
     sec = renderer.doc.sections[-1]
     sec.start_type = WD_SECTION_START.NEW_PAGE
@@ -72,7 +69,9 @@ def render_image_block(renderer, block: ImageBlock):
 
     # Когда указан относительный путь — пробуем несколько мест в проекте (пакет, input/, корень проекта)
     if not os.path.isabs(img_path):
+        doc_dir = getattr(renderer, "base_dir", None)
         candidates = [
+            *([os.path.join(doc_dir, src_path)] if doc_dir else []),  # относительно самого документа
             os.path.join(BASE_DIR, src_path),      # относительно пакета MarkToGost/
             os.path.join(INPUT_DIR, src_path),     # относительно input/
             os.path.join(PROJECT_ROOT, src_path),  # относительно корня проекта

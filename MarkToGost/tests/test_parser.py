@@ -29,6 +29,11 @@ class TestBasicBlocks:
         blocks = parse("### 2.3 Связи между сущностями")
         assert blocks == [HeadingBlock(text="2.3 Связи между сущностями", level=2)]
 
+    def test_appendix_subsection_level(self):
+        assert parse("## А.1 Форма заказа")[0].level == 2
+        assert parse("### B.2.1 Пункт")[0].level == 3
+        assert parse("# ПРИЛОЖЕНИЕ А. ИСХОДНЫЕ ДОКУМЕНТЫ")[0].level == 1
+
     def test_unordered_list(self):
         blocks = parse("- один\n- два")
         assert blocks == [ListBlock(items=["один", "два"], ordered=False)]

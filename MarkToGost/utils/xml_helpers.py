@@ -59,3 +59,27 @@ def add_page_number_centered(document):
             r.font.size = Pt(12)
             r.font.color.rgb = RGBColor(0, 0, 0)
 
+
+
+def end_section_here(body, sectPr) -> None:
+    """Завершает раздел DOCX в текущей позиции: свойства раздела sectPr помещаются в отдельный
+    служебный абзац высотой 1 pt.
+
+    Если записать разрыв раздела в последний абзац текста, Word растягивает его последнюю
+    строку по ширине, как строку перед разрывом.
+    """
+    carrier = OxmlElement('w:p')
+    p_pr = OxmlElement('w:pPr')
+    spacing = OxmlElement('w:spacing')
+    for attr, value in (('w:before', '0'), ('w:after', '0'), ('w:line', '20'), ('w:lineRule', 'exact')):
+        spacing.set(qn(attr), value)
+    ind = OxmlElement('w:ind')
+    ind.set(qn('w:firstLine'), '0')
+    r_pr = OxmlElement('w:rPr')
+    size = OxmlElement('w:sz')
+    size.set(qn('w:val'), '2')
+    r_pr.append(size)
+    for el in (spacing, ind, r_pr, sectPr):
+        p_pr.append(el)
+    carrier.append(p_pr)
+    body.sectPr.addprevious(carrier)

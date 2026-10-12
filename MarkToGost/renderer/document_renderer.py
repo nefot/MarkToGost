@@ -7,12 +7,13 @@ from docx.oxml.ns import qn
 
 from MarkToGost.parser.blocks import (
     BaseBlock, Section, TextBlock, HeadingBlock, ImageBlock, ListBlock,
-    TableBlock, CodeBlock, FormulaBlock
+    TableBlock, CodeBlock, FormulaBlock, SheetBlock
 )
 # Импортируем функции рендеринга из отдельных модулей
 from MarkToGost.renderer.text import render_text_block, render_heading_block
 from MarkToGost.renderer.formula import render_formula_block
 from MarkToGost.renderer.image import render_image_block, close_landscape
+from MarkToGost.renderer.sheets import render_sheet_block
 from MarkToGost.renderer.list_ import render_list_block
 from MarkToGost.renderer.code import render_code_block
 from MarkToGost.renderer.table import render_table_block
@@ -49,7 +50,13 @@ class DocumentRenderer:
             CodeBlock: render_code_block,
             FormulaBlock: render_formula_block,
             HtmlTableBlock: render_html_table_block,
+            SheetBlock: render_sheet_block,
         }
+        # Для вставных листов: значения полей, папка документа и стандартных шаблонов, замечания
+        self.fields = {}
+        self.base_dir = None
+        self.titles_dir = ""
+        self.warnings = []
 
     def _is_document_start(self) -> bool:
         """Проверка начала документа"""
@@ -64,6 +71,7 @@ class DocumentRenderer:
         """
         if self._last_was_break:
             return
+        self._apply_pending_break()  # предыдущий разрыв не должен потеряться
         body = self.doc.element.body
         self._break_marker = body.sectPr.getprevious() if body.sectPr is not None else None
         self._pending_break = True
@@ -92,7 +100,8 @@ class DocumentRenderer:
             nxt.addprevious(p)
 
     def _mark_content(self):
-        """Сброс флага page break после добавления контента"""
+        """Вызывается после добавления содержимого: применяет отложенный разрыв, сбрасывает флаг"""
+        self._apply_pending_break()
         self._last_was_break = False
 
     def render_block(self, block: BaseBlock):

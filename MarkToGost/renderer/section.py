@@ -14,7 +14,7 @@ def render_section_block(renderer, section: Section):
     if not section.add_page_breaks:
         # Если page breaks отключены, просто рендерим содержимое
         if section.section_id:
-            if section.section_id == "ОГЛАВЛЕНИЕ":
+            if section.toc:
                 # Обычный текст, НЕ Heading (чтобы не попало в TOC)
                 p = renderer.doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -36,7 +36,7 @@ def render_section_block(renderer, section: Section):
 
     # 🔹 Заголовок раздела
     if section.section_id:
-        if section.section_id == "ОГЛАВЛЕНИЕ":
+        if section.toc:
             # Обычный текст, НЕ Heading (чтобы не попало в TOC)
             p = renderer.doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -50,7 +50,7 @@ def render_section_block(renderer, section: Section):
             render_heading_block(renderer, heading_block)
 
     # 🔹 Специальная обработка для оглавления
-    if section.section_id == "ОГЛАВЛЕНИЕ":
+    if section.toc:
         add_toc(renderer.doc)
         renderer._mark_content()
 

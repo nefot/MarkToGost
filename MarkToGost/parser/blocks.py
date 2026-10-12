@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List
 from enum import Enum
 
@@ -49,6 +49,7 @@ class HeadingBlock(BaseBlock):
     """Блок заголовка"""
     text: str
     level: int
+    marker: int = field(default=0, compare=False)  # число «#» в разметке
 
 
 @dataclass
@@ -91,9 +92,18 @@ class FormulaBlock(BaseBlock):
 
 
 @dataclass
+class SheetBlock(BaseBlock):
+    """Вставной лист из DOCX-шаблона с полями {{имя}}: титульный лист, задание, отзыв…"""
+    template: str
+    page_numbers: bool = True  # печатать номер на первой странице листа
+    name: str = ""             # имя листа из профиля («титульный лист», «задание»)
+
+
+@dataclass
 class Section(BaseBlock):
     """Раздел документа с уникальным идентификатором и блоками"""
     section_id: str  # Уникальный идентификатор раздела (e.g. "Литература")
     blocks: List[BaseBlock]  # Блоки внутри раздела
     heading_level: int = 4  # Уровень заголовка раздела (2-6), по умолчанию 4 (####)
     add_page_breaks: bool = True  # Добавлять page breaks перед/после раздела (default=True)
+    toc: bool = False  # раздел — содержание (оглавление)
