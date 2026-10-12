@@ -15,8 +15,7 @@ def render_formula_block(renderer, block: FormulaBlock):
     """
     # --- Нумерация ---
     if not block.number:
-        block.number = str(renderer.formula_counter)
-        renderer.formula_counter += 1
+        block.number = renderer.numbering.next("формула")
 
     if block.formula_id:
         renderer.formula_refs[block.formula_id] = block.number

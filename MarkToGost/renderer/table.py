@@ -98,7 +98,7 @@ def render_table_block(renderer, block: TableBlock):
             line_spacing=DocumentSettings.LINE_SPACING
         )
         cap.paragraph_format.keep_with_next = True
-        caption_full = f"Таблица {renderer.table_counter} — {block.caption}"
+        caption_full = f"Таблица {renderer.numbering.next('таблица')} — {block.caption}"
         for part_text, is_italic in apply_italic_formatting(caption_full):
             run = cap.add_run(part_text)
             set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False, italic=is_italic)
@@ -171,7 +171,5 @@ def render_table_block(renderer, block: TableBlock):
 
     set_table_borders(table)
 
-    if numbered:
-        renderer.table_counter += 1
     renderer._mark_content()
 

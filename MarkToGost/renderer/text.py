@@ -36,6 +36,7 @@ def render_text_block(renderer, block: TextBlock):
 
 def render_heading_block(renderer, block: HeadingBlock):
     """Рендеринг заголовка"""
+    renderer.numbering.on_heading(block.text)
     if not renderer.use_headings:
         # Рендерим как обычный жирный текст без стиля Heading
         p = renderer.doc.add_paragraph()

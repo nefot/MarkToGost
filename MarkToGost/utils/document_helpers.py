@@ -74,7 +74,8 @@ def is_md_table_separator(line: str) -> bool:
         return False
 
     parts = split_md_table_row(line)
-    if len(parts) < 2:
+    # Таблица из одной колонки допустима, если строка обрамлена чертами: |---|
+    if not parts or (len(parts) < 2 and not line.strip().startswith('|')):
         return False
 
     for part in parts:

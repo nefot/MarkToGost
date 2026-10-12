@@ -30,7 +30,7 @@ try {
         $table = $doc.Tables.Item($i)
         $caption = $table.Range.Previous($wdParagraph, 1)
         $text = if ($caption) { $caption.Text } else { "" }
-        if ($text -notmatch '^(Таблица|Продолжение таблицы) (\d+)') { $i++; continue }
+        if ($text -notmatch '^(Таблица|Продолжение таблицы) ([0-9A-ZА-ЯЁ]+(?:\.[0-9]+)*)') { $i++; continue }
         $number = $Matches[2]
 
         $startPage = $table.Rows.Item(1).Range.Information($wdActiveEndPageNumber)

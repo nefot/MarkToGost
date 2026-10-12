@@ -33,6 +33,9 @@ class DocumentSettings:
     # Настройки таблиц
     TABLE_FONT_SIZE_PT = 12
 
+    # Нумерация рисунков, таблиц и формул: «сквозная», «по разделам» (2.1), «по подразделам» (3.2.1)
+    OBJECT_NUMBERING = "сквозная"
+
     # Блоки кода: None — как у основного текста
     CODE_FONT_SIZE_PT = None
     CODE_LINE_SPACING = None

@@ -291,9 +291,12 @@ class MarkdownParser:
         if self.index + 2 >= len(self.lines):
             return False
         line = self.lines[self.index].strip()
-        return (bool(normalize_table_caption(line))
-                and is_md_table_row(self.lines[self.index + 1].strip())
-                and is_md_table_separator(self.lines[self.index + 2].strip()))
+        if not normalize_table_caption(line):
+            return False
+        following = self.lines[self.index + 1].strip()
+        if self._is_html_table_start(following):
+            return True
+        return is_md_table_row(following) and is_md_table_separator(self.lines[self.index + 2].strip())
 
     def _is_list_start(self) -> bool:
         """Проверка начала списка"""
@@ -432,6 +435,7 @@ class MarkdownParser:
         return line.strip().lower().startswith('<table')
 
     def _parse_html_table(self) -> HtmlTableBlock:
+        caption = normalize_table_caption(self.lines[self.index - 1].strip()) if self.index > 0 else None
         html_lines = []
         while self.index < len(self.lines):
             l = self.lines[self.index]
@@ -439,5 +443,8 @@ class MarkdownParser:
             self.index += 1
             if '</table>' in l.lower():
                 break
-        return parse_html_table('\n'.join(html_lines))
+        block = parse_html_table('\n'.join(html_lines))
+        if caption and not block.caption:
+            block.caption = caption
+        return block
 # За пределами класса MarkdownParser (в том же файле):

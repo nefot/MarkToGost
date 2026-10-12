@@ -67,7 +67,7 @@ def render_html_table_block(renderer, block: HtmlTableBlock):
         cap.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         cap.paragraph_format.space_before = Pt(6)
         cap.paragraph_format.space_after = Pt(0)
-        run = cap.add_run(f"Таблица {renderer.table_counter} — {block.caption}")
+        run = cap.add_run(f"Таблица {renderer.numbering.next('таблица')} — {block.caption}")
         set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False)
 
     # Создаём таблицу
@@ -134,5 +134,4 @@ def render_html_table_block(renderer, block: HtmlTableBlock):
         _remove_table_borders(table)
     else:
         set_table_borders(table)
-    renderer.table_counter += 1
     renderer._mark_content()

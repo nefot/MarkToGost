@@ -38,6 +38,7 @@ from MarkToGost.renderer.document_renderer import DocumentRenderer
 from MarkToGost.renderer.sheets import template_fields
 from MarkToGost.structure import check_fields, check_structure, group_sections, insert_toc, place_sheets
 from MarkToGost.utils.formatting import set_run_font
+from MarkToGost.utils.numbering import normalize_mode
 from MarkToGost.utils.toc import get_toc_level, reset_heading_styles
 from MarkToGost.utils.xml_helpers import add_page_number_centered, set_repeat_table_header, set_table_borders
 
@@ -293,6 +294,11 @@ def create_document(md_text: str, base_dir: Optional[str] = None,
                     setattr(DocumentSettings, FORMAT_KEYS[key], value)
             for attr, value in _cli_overrides.items():
                 setattr(DocumentSettings, attr, value)
+        try:
+            DocumentSettings.OBJECT_NUMBERING = normalize_mode(DocumentSettings.OBJECT_NUMBERING)
+        except ValueError as e:
+            warnings.append(f"{e}; используется сквозная нумерация")
+            DocumentSettings.OBJECT_NUMBERING = "сквозная"
         return _build(body, base_dir, profile, fields, sheets, warnings)
 
 

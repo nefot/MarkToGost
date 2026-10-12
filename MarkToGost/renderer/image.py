@@ -122,9 +122,7 @@ def render_image_block(renderer, block: ImageBlock):
         if block.img_id and block.img_id in renderer.image_refs:
             fig_num = renderer.image_refs[block.img_id]
         else:
-            # Иначе увеличиваем счетчик
-            renderer.figure_counter += 1
-            fig_num = renderer.figure_counter
+            fig_num = renderer.numbering.next("рисунок")
             # Сохраняем в image_refs, если есть ID
             if block.img_id:
                 renderer.image_refs[block.img_id] = fig_num

@@ -14,6 +14,8 @@ from MarkToGost.renderer.text import render_text_block, render_heading_block
 from MarkToGost.renderer.formula import render_formula_block
 from MarkToGost.renderer.image import render_image_block, close_landscape
 from MarkToGost.renderer.sheets import render_sheet_block
+from MarkToGost.config import DocumentSettings
+from MarkToGost.utils.numbering import Numbering
 from MarkToGost.renderer.list_ import render_list_block
 from MarkToGost.renderer.code import render_code_block
 from MarkToGost.renderer.table import render_table_block
@@ -29,9 +31,8 @@ class DocumentRenderer:
 
     def __init__(self, doc: Document, toc_entries: List[tuple] = None, use_headings: bool = True):
         self.doc = doc
-        self.table_counter = 1
-        self.formula_counter = 1  # Счетчик формул
-        self.figure_counter = 0
+        # Номера рисунков, таблиц и формул (сквозные или по разделам — DocumentSettings.OBJECT_NUMBERING)
+        self.numbering = Numbering(DocumentSettings.OBJECT_NUMBERING)
         self.image_map = {}
         self.image_refs = {}  # Для хранения ссылок на изображения по их ID
         self.formula_refs = {}  # Для хранения ссылок на формулы по их ID
