@@ -18,6 +18,7 @@ from typing import List, Optional
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, Cm
+from docx.oxml.ns import qn
 
 from MarkToGost.config import DocumentSettings
 from MarkToGost.parser.blocks import Section, HeadingBlock
@@ -61,6 +62,8 @@ def apply_cli_overrides(args, settings):
         'caption_italic': 'CAPTION_ITALIC',
         'table_font_size': 'TABLE_FONT_SIZE_PT',
         'use_first_line_indent': 'USE_FIRST_LINE_INDENT',
+        'code_font_size': 'CODE_FONT_SIZE_PT',
+        'code_line_spacing': 'CODE_LINE_SPACING',
     }
     for arg_name, setting_name in mapping.items():
         value = getattr(args, arg_name, None)
@@ -140,6 +143,14 @@ def create_document(md_text: str) -> Document:
     renderer = DocumentRenderer(doc, toc_entries, use_headings=metadata['use_headings'])
     for block in blocks:
         renderer.render_block(block)
+
+    # Последний раздел тоже завершается разрывом страницы — в конце документа он дал бы пустую страницу
+    body = doc.element.body
+    last = body.sectPr.getprevious() if body.sectPr is not None else None
+    if last is not None and last.tag == qn('w:p'):
+        for br in last.findall('.//' + qn('w:br')):
+            if br.get(qn('w:type')) == 'page' and br.getparent().getparent() is last:
+                last.remove(br.getparent())
 
     # Таблица подписей (если указано is_table: true)
     if metadata['is_table']:
@@ -248,6 +259,11 @@ def process_md_file(input_path: str, output_path: Optional[str] = None) -> bool:
 
 
 if __name__ == "__main__":
+    # Консоль Windows (cp1251) не умеет выводить эмодзи — без этого скрипт падает до обработки файлов
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(
         description="MarkToGost: Конвертер Markdown → DOCX по ГОСТ 7.32-2001",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -311,6 +327,10 @@ if __name__ == "__main__":
                            help=f'Размер шрифта таблиц в pt (по умол.: {DocumentSettings.TABLE_FONT_SIZE_PT})')
     doc_group.add_argument('--use-first-line-indent', default=None, type=lambda x: x.lower() == 'true',
                            help=f'Красная строка: true/false (по умол.: {DocumentSettings.USE_FIRST_LINE_INDENT})')
+    doc_group.add_argument('--code-font-size', default=None, type=float,
+                           help='Размер шрифта блоков кода в pt (по умол.: как у текста)')
+    doc_group.add_argument('--code-line-spacing', default=None, type=float,
+                           help='Межстрочный интервал блоков кода (по умол.: как у текста)')
 
     args = parser.parse_args()
 

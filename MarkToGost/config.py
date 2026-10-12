@@ -1,5 +1,7 @@
 # config.py
 
+import os
+
 from docx.shared import Pt, Cm
 
 
@@ -30,6 +32,23 @@ class DocumentSettings:
 
     # Настройки таблиц
     TABLE_FONT_SIZE_PT = 12
+
+    # Блоки кода: None — как у основного текста
+    CODE_FONT_SIZE_PT = None
+    CODE_LINE_SPACING = None
+
+class DrawioSettings:
+    """Экспорт схем draw.io (см. utils/drawio.py)"""
+    EXE_CANDIDATES = [
+        r"C:\Program Files\draw.io\draw.io.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\draw.io\draw.io.exe"),
+        "/Applications/draw.io.app/Contents/MacOS/draw.io",
+    ]
+    CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output", ".drawio_cache")
+    SCALE = 2          # масштаб PNG для чёткости при печати
+    BORDER = 10        # поля вокруг схемы, px
+    TIMEOUT_SEC = 60
+
 
 class CaptionSettings:
     """Настройки подписей к элементам"""

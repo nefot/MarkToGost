@@ -57,6 +57,7 @@ class ImageBlock(BaseBlock):
     path: str
     caption: str
     img_id: Optional[str] = None
+    landscape: bool = False  # отдельная альбомная страница для широкой схемы
 
 
 @dataclass

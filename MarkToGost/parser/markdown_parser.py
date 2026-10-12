@@ -39,6 +39,8 @@ class MarkdownParser:
                 blocks.append(self._parse_image(line))
             elif self._is_table_start():
                 blocks.append(self._parse_table())
+            elif self._is_table_caption():
+                self.index += 1  # подпись заберёт _parse_table
             elif self._is_list_start():
                 blocks.append(self._parse_list())
             elif self._is_code_block_start(line):
@@ -150,8 +152,8 @@ class MarkdownParser:
         return None, 4, True  # По умолчанию уровень 4, с page breaks
 
     def _is_section_with_content(self, line: str) -> bool:
-        """Проверка, содержит ли строка открывающую скобку раздела: [//]: #### (ID) {"""
-        return bool(re.match(r'^\[//\]:\s*#{1,6}\s*\([^)]+\)\s*\{', line))
+        """Проверка, содержит ли строка открывающую скобку раздела: [//]: #### (ID)[params] {"""
+        return bool(re.match(r'^\[//\]:\s*#{1,6}\s*\([^)]+\)(?:\[[^\]]*\])?\s*\{', line))
 
     def _parse_section(self) -> Section:
         """Парсинг раздела с блоками или без"""
@@ -206,8 +208,8 @@ class MarkdownParser:
                 self.index += 1
                 continue
 
-            # Проверяем закрывающую скобку
-            if line == "}" or line.endswith("}"):
+            # Проверяем закрывающую скобку (строка рисунка может оканчиваться атрибутами {#id landscape})
+            if line == "}" or (line.endswith("}") and not self._is_image(line)):
                 brace_count -= 1
                 if brace_count == 0:
                     self.index += 1
@@ -231,10 +233,14 @@ class MarkdownParser:
                 section_blocks.append(self._parse_image(line))
             elif self._is_table_start():
                 section_blocks.append(self._parse_table())
+            elif self._is_table_caption():
+                self.index += 1  # подпись заберёт _parse_table
             elif self._is_list_start():
                 section_blocks.append(self._parse_list())
             elif self._is_code_block_start(line):
                 section_blocks.append(self._parse_code_block())
+            elif self._is_html_table_start(line):
+                section_blocks.append(self._parse_html_table())
             elif not self._is_section_start(line):  # Не начинаем новый раздел внутри раздела
                 section_blocks.append(self._parse_text_block())
             else:
@@ -260,6 +266,15 @@ class MarkdownParser:
 
         return is_md_table_row(current) and is_md_table_separator(next_line)
 
+    def _is_table_caption(self) -> bool:
+        """Подпись «Таблица N — ...» в строке непосредственно перед таблицей"""
+        if self.index + 2 >= len(self.lines):
+            return False
+        line = self.lines[self.index].strip()
+        return (bool(normalize_table_caption(line))
+                and is_md_table_row(self.lines[self.index + 1].strip())
+                and is_md_table_separator(self.lines[self.index + 2].strip()))
+
     def _is_list_start(self) -> bool:
         """Проверка начала списка"""
         line = self.lines[self.index].strip()
@@ -276,13 +291,14 @@ class MarkdownParser:
         return HeadingBlock(text=text, level=level)
 
     def _parse_image(self, line: str) -> ImageBlock:
-        # Поддержка формата: ![caption](path){#id}
-        match = re.match(r'!\[(.*?)\]\((.*?)\)(?:\{#([^}]+)\})?', line)
+        # Поддержка формата: ![caption](path){#id landscape}
+        match = re.match(r'!\[(.*?)\]\((.*?)\)(?:\{([^}]*)\})?', line)
         caption = match.group(1) if match else ""
         path = match.group(2) if match else ""
-        img_id = match.group(3) if match and match.group(3) else None
+        attrs = (match.group(3) or "").split() if match else []
+        img_id = next((a[1:] for a in attrs if a.startswith("#")), None)
         self.index += 1
-        return ImageBlock(path=path, caption=caption, img_id=img_id)
+        return ImageBlock(path=path, caption=caption, img_id=img_id, landscape="landscape" in attrs)
 
     def _parse_table(self) -> TableBlock:
         table_caption = None
@@ -340,8 +356,9 @@ class MarkdownParser:
         return ListBlock(items=items, ordered=ordered)
 
     def _parse_code_block(self) -> CodeBlock:
-        """Парсинг блока кода"""
-        self.index += 1  # Пропускаем строку с ```
+        """Парсинг блока кода: ```язык ... ```, текст сохраняется как есть"""
+        language = self.lines[self.index].strip()[3:].strip()
+        self.index += 1  # Пропускаем открывающую строку
 
         code_lines = []
         while self.index < len(self.lines):
@@ -351,18 +368,9 @@ class MarkdownParser:
             code_lines.append(line)
             self.index += 1
 
-        self.index += 1  # Пропускаем строку с ```
+        self.index += 1  # Пропускаем закрывающую строку
 
-        code = "\n".join(code_lines).strip()
-        language = ""
-
-        # Попытка извлечь язык из первой строки кода
-        if code_lines and ":" in code_lines[0]:
-            parts = code_lines[0].split(":", 1)
-            language = parts[0].strip()
-            code = parts[1].strip() if len(parts) > 1 else ""
-
-        return CodeBlock(code=code, language=language)
+        return CodeBlock(code="\n".join(code_lines).strip("\n"), language=language)
 
     def _parse_text_block(self) -> TextBlock:
         """Парсинг блока обычного текста"""
@@ -383,7 +391,7 @@ class MarkdownParser:
                 break
             if line.startswith("$$"):  # Формула
                 break
-            if self._is_table_start() or self._is_list_start():
+            if self._is_table_start() or self._is_list_start() or self._is_table_caption():
                 break
             if self._is_section_start(line):
                 break

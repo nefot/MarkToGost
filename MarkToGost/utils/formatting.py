@@ -18,9 +18,14 @@ def apply_italic_formatting(text: str) -> List[Tuple[str, bool]]:
         "обычный"         -> [("обычный", False)]
         "_курсив_"        -> [("курсив", True)]
         "до _курсив_ после" -> [("до ", False), ("курсив", True), (" после", False)]
+        "print\\_order"    -> [("print_order", False)]   — \\_ выводит подчёркивание как есть
     """
     if not text or '_' not in text:
         return [(text, False)]
+
+    # Экранированное подчёркивание прячем, чтобы оно не открывало курсив
+    placeholder = '\x00'
+    text = text.replace('\\_', placeholder)
 
     result = []
     pattern = re.compile(r'_(.*?)_')
@@ -35,7 +40,7 @@ def apply_italic_formatting(text: str) -> List[Tuple[str, bool]]:
     if last_end < len(text):
         result.append((text[last_end:], False))
 
-    return result
+    return [(part.replace(placeholder, '_'), italic) for part, italic in result]
 
 
 def set_run_font(run, size_pt: int = 14, bold: bool = False, italic: bool = False):
