@@ -202,12 +202,94 @@ def zadanie(path):
     doc.save(path)
 
 
+def article_paragraph(doc, runs, align=WD_ALIGN_PARAGRAPH.CENTER, size=14, first_line_cm=0.0,
+                      hyphenate=True):
+    """Абзац шапки статьи. runs — [(текст, жирный, курсив, прописные)]; пустой список — отбивка size pt"""
+    p = doc.add_paragraph()
+    # Сначала свои элементы pPr: python-docx вставит отступы и выравнивание между ними по схеме
+    p_pr = p._p.get_or_add_pPr()
+    if not hyphenate:
+        p_pr.append(OxmlElement("w:suppressAutoHyphens"))
+    # Размер знака абзаца — высота пустой строки-отбивки
+    mark = OxmlElement("w:rPr")
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), str(size * 2))
+    mark.append(sz)
+    p_pr.append(mark)
+    p.alignment = align
+    fmt = p.paragraph_format
+    fmt.first_line_indent = Cm(first_line_cm)
+    fmt.left_indent = Cm(0)
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    fmt.line_spacing = 1.0
+    for text, bold, italic, caps in runs:
+        run = p.add_run(text)
+        run.font.name = FONT
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.italic = italic
+        run.font.all_caps = caps
+    return p
+
+
+def statya(path):
+    """Шапка научной статьи (ИИМО-2026, ЮРГПУ (НПИ)): УДК, название, авторы, аннотации на двух языках.
+    Вставляется в начало текста без разрыва страницы."""
+    doc = new_document(v_align=None)
+    sec = doc.sections[0]
+    sec.right_margin = Cm(2.0)
+    left, justify = WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.JUSTIFY
+
+    def title(field):
+        article_paragraph(doc, [("{{" + field + "}}", True, False, True)], hyphenate=False)
+
+    def authors(names, email=None):
+        runs = [("{{" + names + "}}", True, True, False)]
+        if email:
+            runs.append((", e-mail: {{" + email + "}}", False, True, False))
+        article_paragraph(doc, runs)
+
+    def summary(label, field):
+        article_paragraph(doc, [(label, True, True, False), (" {{" + field + "}}", False, True, False)],
+                          align=justify, size=12, first_line_cm=1.25)
+
+    article_paragraph(doc, [("УДК {{удк}}", False, False, False)], align=left)
+    title("название")
+    article_paragraph(doc, [], size=10)
+    authors("авторы", "email")
+    article_paragraph(doc, [("{{организация}}", False, False, False)], size=12)
+    article_paragraph(doc, [], size=12)
+    summary("Аннотация.", "аннотация")
+    summary("Ключевые слова:", "ключевые_слова")
+    article_paragraph(doc, [], size=10)
+    title("название_en")
+    article_paragraph(doc, [], size=10)
+    authors("авторы_en")
+    article_paragraph(doc, [("{{организация_en}}", False, False, False)], size=12)
+    article_paragraph(doc, [], size=12)
+    summary("Abstract.", "аннотация_en")
+    summary("Keywords:", "ключевые_слова_en")
+    article_paragraph(doc, [], size=10)
+    doc.save(path)
+
+
+def statya_konec(path):
+    """Знак авторского права в конце статьи: «© Фамилия И.О., год»"""
+    doc = new_document(v_align=None)
+    article_paragraph(doc, [], size=12)
+    article_paragraph(doc, [("© {{копирайт}}, {{год}}", False, False, False)], align=WD_ALIGN_PARAGRAPH.RIGHT)
+    doc.save(path)
+
+
 TEMPLATES = {
     "kursovaya.docx": kursovaya,
     "referat.docx": kursovaya,
     "vkr.docx": vkr,
     "praktika.docx": praktika,
     "zadanie.docx": zadanie,
+    "statya.docx": statya,
+    "statya_konec.docx": statya_konec,
 }
 
 

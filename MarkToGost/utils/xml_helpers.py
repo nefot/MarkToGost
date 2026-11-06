@@ -61,6 +61,21 @@ def add_page_number_centered(document):
 
 
 
+def set_auto_hyphenation(document) -> None:
+    """Автоматическая расстановка переносов во всём документе (настройка Word)"""
+    settings = document.settings.element
+    el = settings.find(qn('w:autoHyphenation'))
+    if el is None:
+        el = OxmlElement('w:autoHyphenation')
+        # По схеме OOXML autoHyphenation идёт сразу после defaultTabStop
+        anchor = settings.find(qn('w:defaultTabStop'))
+        if anchor is not None:
+            anchor.addnext(el)
+        else:
+            settings.insert(0, el)
+    el.set(qn('w:val'), 'true')
+
+
 def end_section_here(body, sectPr) -> None:
     """Завершает раздел DOCX в текущей позиции: свойства раздела sectPr помещаются в отдельный
     служебный абзац высотой 1 pt.

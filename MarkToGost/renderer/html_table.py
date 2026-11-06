@@ -9,7 +9,7 @@ from docx.oxml.ns import qn
 from MarkToGost.config import DocumentSettings
 from MarkToGost.formula_renderer import add_inline_formula
 from MarkToGost.parser.blocks import HtmlTableBlock
-from MarkToGost.utils.formatting import set_run_font
+from MarkToGost.utils.formatting import set_run_font, table_caption_align, table_caption_text
 from MarkToGost.utils.xml_helpers import set_table_borders
 
 from MarkToGost.parser.blocks import HtmlTableBlock, CellAlign
@@ -64,11 +64,11 @@ def render_html_table_block(renderer, block: HtmlTableBlock):
     # Подпись
     if block.caption:
         cap = renderer.doc.add_paragraph()
-        cap.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        cap.alignment = table_caption_align()
         cap.paragraph_format.space_before = Pt(6)
         cap.paragraph_format.space_after = Pt(0)
-        run = cap.add_run(f"Таблица {renderer.numbering.next('таблица')} — {block.caption}")
-        set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False)
+        run = cap.add_run(table_caption_text(renderer.numbering.next('таблица'), block.caption))
+        set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=DocumentSettings.CAPTION_BOLD)
 
     # Создаём таблицу
     table = renderer.doc.add_table(rows=len(block.rows), cols=max_cols)

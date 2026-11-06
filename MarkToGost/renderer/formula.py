@@ -14,7 +14,10 @@ def render_formula_block(renderer, block: FormulaBlock):
     в редакторе формул Word, не требуют внешних шрифтов.
     """
     # --- Нумерация ---
-    if not block.number:
+    # «по ссылкам» — номер получают только формулы с {#id}, на которые ссылается текст
+    mode = " ".join(str(DocumentSettings.FORMULA_NUMBERING).replace("_", " ").lower().split())
+    by_refs = mode == "по ссылкам"
+    if not block.number and (block.formula_id or not by_refs):
         block.number = renderer.numbering.next("формула")
 
     if block.formula_id:

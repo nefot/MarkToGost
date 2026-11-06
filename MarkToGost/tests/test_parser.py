@@ -150,3 +150,27 @@ class TestEscapedUnderscore:
 
     def test_escaped_underscore_inside_italic_text(self):
         assert apply_italic_formatting(r"_a\_b_ и c") == [("a_b", True), (" и c", False)]
+
+
+# ================================
+# Формулы: идентификатор и ссылки
+# ================================
+
+class TestFormulaRefs:
+
+    def test_formula_id(self):
+        block = parse("$$\nE = mc^2\n$$ {#energy}")[0]
+        assert block.latex == "E = mc^2"
+        assert block.formula_id == "energy"
+
+    def test_formula_without_id(self):
+        assert parse("$$\nE = mc^2\n$$")[0].formula_id is None
+
+    def test_replace_formula_refs(self):
+        from MarkToGost.utils.document_helpers import replace_formula_refs
+        text = "по формуле @energy, адрес a@mail.ru"
+        assert replace_formula_refs(text, {"energy": "2"}) == "по формуле (2), адрес a@mail.ru"
+
+    def test_sheet_in_text_option(self):
+        block = parse("{{лист: шапка.docx | в тексте}}")[0]
+        assert block.new_page is False

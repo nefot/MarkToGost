@@ -43,6 +43,23 @@ def apply_italic_formatting(text: str) -> List[Tuple[str, bool]]:
     return [(part.replace(placeholder, '_'), italic) for part, italic in result]
 
 
+CAPTION_ALIGN = {
+    "слева": WD_ALIGN_PARAGRAPH.LEFT,
+    "по центру": WD_ALIGN_PARAGRAPH.CENTER,
+    "справа": WD_ALIGN_PARAGRAPH.RIGHT,
+}
+
+
+def table_caption_align():
+    """Выравнивание подписи таблицы (параметр «подпись_таблицы»)"""
+    value = " ".join(str(DocumentSettings.TABLE_CAPTION_ALIGN).lower().split())
+    return CAPTION_ALIGN.get(value, WD_ALIGN_PARAGRAPH.RIGHT)
+
+
+def table_caption_text(number: str, caption: str) -> str:
+    return f"Таблица {number} {DocumentSettings.CAPTION_DASH} {caption}"
+
+
 def set_run_font(run, size_pt: int = 14, bold: bool = False, italic: bool = False):
     """
     Устанавливает шрифт, размер, начертание и цвет для run.

@@ -7,7 +7,7 @@
 import datetime
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 
@@ -33,6 +33,15 @@ FORMAT_KEYS = {
     "размер_шрифта_кода": "CODE_FONT_SIZE_PT",
     "интервал_кода": "CODE_LINE_SPACING",
     "нумерация_объектов": "OBJECT_NUMBERING",
+    "префикс_рисунка": "FIGURE_PREFIX",
+    "тире_подписей": "CAPTION_DASH",
+    "жирные_подписи": "CAPTION_BOLD",
+    "подпись_таблицы": "TABLE_CAPTION_ALIGN",
+    "прописные_заголовки": "UPPERCASE_H1",
+    "выступ_списка": "LIST_HANGING_CM",
+    "нумерация_формул": "FORMULA_NUMBERING",
+    "поле_колонтитула": "HEADER_DISTANCE_CM",
+    "автоперенос": "AUTO_HYPHENATION",
 }
 # Прочие параметры оформления, которыми управляет сборка документа, а не DocumentSettings
 LAYOUT_KEYS = {"нумерация_страниц", "содержание", "заголовок_содержания", "разделы_с_новой_страницы"}
@@ -55,6 +64,7 @@ class StructureItem:
     before_toc: bool = False   # элемент располагается перед содержанием (реферат ВКР)
     prefix: bool = False       # совпадение по началу заголовка (ПРИЛОЖЕНИЕ А, ПРИЛОЖЕНИЕ Б…)
     main_part: bool = False    # «основная часть» — разделы с номером
+    formatting: Dict[str, object] = field(default_factory=dict)  # оформление только этого раздела
 
     def matches(self, heading: str) -> bool:
         text = _norm(heading)
@@ -76,6 +86,7 @@ class SheetSpec:
     page_numbers: bool = True
     required_fields: List[str] = field(default_factory=list)
     enabled: bool = False           # включён без упоминания в шапке
+    new_page: bool = True           # нет — содержимое листа идёт в тексте (шапка статьи)
 
 
 def parse_sheet(name: str, spec: dict) -> SheetSpec:
@@ -95,6 +106,7 @@ def parse_sheet(name: str, spec: dict) -> SheetSpec:
         page_numbers=_flag(spec.get("номер_страницы", True)),
         required_fields=list(spec.get("обязательные_поля", [])),
         enabled=_flag(spec.get("включён", False)),
+        new_page=_flag(spec.get("с_новой_страницы", True)),
     )
 
 
@@ -116,12 +128,16 @@ class Profile:
     required_fields: List[str]
     fields: Dict[str, str]
     sheets: Dict[str, SheetSpec] = field(default_factory=dict)
+    title_new_page: bool = True
+    word_limits: Dict[str, Tuple[int, int]] = field(default_factory=dict)  # поле → (мин, макс) слов
 
-    def title_sheet(self) -> Optional[SheetSpec]:
-        if not self.title_template:
+    def title_sheet(self, template: Optional[str] = None) -> Optional[SheetSpec]:
+        template = template or self.title_template
+        if not template:
             return None
-        return SheetSpec(name=TITLE_SHEET, template=self.title_template, place="начало",
-                         page_numbers=False, required_fields=self.required_fields, enabled=True)
+        return SheetSpec(name=TITLE_SHEET, template=template, place="начало",
+                         page_numbers=False, required_fields=self.required_fields, enabled=True,
+                         new_page=self.title_new_page)
 
     @property
     def toc(self) -> bool:
@@ -209,6 +225,7 @@ def _structure(items) -> List[StructureItem]:
                 required=bool(item.get("обязательный", True)),
                 before_toc=bool(item.get("перед_содержанием", False)),
                 prefix=bool(item.get("по_началу", False)),
+                formatting=dict(item.get("оформление") or {}),
             ))
     return result
 
@@ -261,7 +278,19 @@ def load_profile(name: Optional[str]) -> Profile:
         required_fields=list(title.get("обязательные_поля", [])),
         fields=_field_defaults(raw.get("поля")),
         sheets={name: parse_sheet(name, spec) for name, spec in (raw.get("листы") or {}).items()},
+        title_new_page=_flag(title.get("с_новой_страницы", True)),
+        word_limits=_word_limits(title.get("число_слов")),
     )
+
+
+def _word_limits(values) -> Dict[str, Tuple[int, int]]:
+    """«аннотация: [70, 100]» → {"аннотация": (70, 100)}"""
+    result = {}
+    for name, limits in (values or {}).items():
+        if not isinstance(limits, (list, tuple)) or len(limits) != 2:
+            raise ProfileError(f"число_слов «{name}»: ожидалось [минимум, максимум]")
+        result[name] = (int(limits[0]), int(limits[1]))
+    return result
 
 
 def split_settings(values: dict):
@@ -279,6 +308,14 @@ def split_settings(values: dict):
         else:
             fields[key] = _field_text(value)
     return formatting, fields
+
+
+def apply_formatting(formatting: dict) -> None:
+    """Параметры раздела «оформление» → DocumentSettings (прочие ключи пропускаются)"""
+    from MarkToGost.config import DocumentSettings
+    for key, value in (formatting or {}).items():
+        if key in FORMAT_KEYS and value is not None:
+            setattr(DocumentSettings, FORMAT_KEYS[key], value)
 
 
 def unknown_format_keys(formatting: dict) -> List[str]:

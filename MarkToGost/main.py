@@ -19,7 +19,6 @@ import sys
 from contextlib import contextmanager
 from typing import List, Optional
 
-import yaml
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -27,20 +26,25 @@ from docx.shared import Cm, Pt
 
 from MarkToGost.config import DocumentSettings
 from MarkToGost.parser.blocks import HeadingBlock, Section
-from MarkToGost.parser.frontmatter import split_front_matter
+from MarkToGost.parser.frontmatter import load_yaml, split_front_matter
 from MarkToGost.parser.markdown_parser import MarkdownParser
 from MarkToGost.parser.metadata import extract_metadata
 from MarkToGost.profiles import (
-    FORMAT_KEYS, TITLE_SHEET, TITLES_DIR, Profile, ProfileError, SheetSpec, available_profiles, load_profile,
+    TITLE_SHEET, TITLES_DIR, Profile, ProfileError, SheetSpec, apply_formatting, available_profiles, load_profile,
     merge, parse_sheet, split_settings, unknown_format_keys
 )
 from MarkToGost.renderer.document_renderer import DocumentRenderer
 from MarkToGost.renderer.sheets import template_fields
-from MarkToGost.structure import check_fields, check_structure, group_sections, insert_toc, place_sheets
+from MarkToGost.structure import (
+    apply_section_formatting, check_fields, check_structure, check_word_limits, group_sections, insert_toc,
+    place_sheets
+)
 from MarkToGost.utils.formatting import set_run_font
 from MarkToGost.utils.numbering import normalize_mode
 from MarkToGost.utils.toc import get_toc_level, reset_heading_styles
-from MarkToGost.utils.xml_helpers import add_page_number_centered, set_repeat_table_header, set_table_borders
+from MarkToGost.utils.xml_helpers import (
+    add_page_number_centered, set_auto_hyphenation, set_repeat_table_header, set_table_borders
+)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INPUT_DIR = os.path.join(PROJECT_ROOT, "input")
@@ -98,7 +102,7 @@ def load_user_defaults(base_dir: Optional[str]) -> dict:
         path = os.path.join(folder, DEFAULTS_FILE)
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+                data = load_yaml(f.read()) or {}
             if not isinstance(data, dict):
                 raise ProfileError(f"{path}: ожидались строки «ключ: значение»")
             result = merge(result, data)
@@ -129,8 +133,7 @@ def _sheet_specs(profile: Profile, settings: dict, warnings: List[str]) -> List[
         if profile.title_sheet():
             specs.append(profile.title_sheet())
     elif str(title).strip().lower() not in ("", "нет", "false", "none"):
-        specs.append(SheetSpec(name=TITLE_SHEET, template=str(title), place="начало", page_numbers=False,
-                               required_fields=profile.required_fields, enabled=True))
+        specs.append(profile.title_sheet(str(title)))
 
     requested = settings.get("листы") or []
     if not isinstance(requested, list):
@@ -210,6 +213,10 @@ def _build(md_text: str, base_dir: Optional[str], profile: Optional[Profile], fi
         s.right_margin = Cm(DocumentSettings.RIGHT_MARGIN_CM)
         s.top_margin = Cm(DocumentSettings.TOP_MARGIN_CM)
         s.bottom_margin = Cm(DocumentSettings.BOTTOM_MARGIN_CM)
+        if DocumentSettings.HEADER_DISTANCE_CM is not None:
+            s.header_distance = s.footer_distance = Cm(DocumentSettings.HEADER_DISTANCE_CM)
+    if DocumentSettings.AUTO_HYPHENATION:
+        set_auto_hyphenation(doc)
     normal = doc.styles['Normal']
     normal.font.name = DocumentSettings.FONT_NAME
     normal.font.size = Pt(DocumentSettings.FONT_SIZE_PT)
@@ -232,11 +239,13 @@ def _build(md_text: str, base_dir: Optional[str], profile: Optional[Profile], fi
     blocks = MarkdownParser(md_text).parse()
     if profile is not None:
         blocks = group_sections(blocks, profile.sections_new_page)
+        apply_section_formatting(blocks, profile)
         if profile.toc:
             blocks = insert_toc(blocks, profile)
         warnings.extend(check_structure(blocks, profile))
         for spec in sheets:
             warnings.extend(check_fields(fields, spec.required_fields, spec.name))
+        warnings.extend(check_word_limits(fields, profile.word_limits))
         blocks, sheet_warnings = place_sheets(blocks, sheets)
         warnings.extend(sheet_warnings)
 
@@ -258,6 +267,7 @@ def _build(md_text: str, base_dir: Optional[str], profile: Optional[Profile], fi
     renderer.fields = fields
     renderer.titles_dir = TITLES_DIR
     renderer.warnings = warnings
+    renderer.collect_refs(blocks)
     for block in blocks:
         renderer.render_block(block)
 
@@ -289,9 +299,7 @@ def create_document(md_text: str, base_dir: Optional[str] = None,
 
     with settings_scope():
         if profile is not None:
-            for key, value in profile.formatting.items():
-                if key in FORMAT_KEYS and value is not None:
-                    setattr(DocumentSettings, FORMAT_KEYS[key], value)
+            apply_formatting(profile.formatting)
             for attr, value in _cli_overrides.items():
                 setattr(DocumentSettings, attr, value)
         try:
@@ -394,19 +402,23 @@ def scaffold(type_name: str, path: str) -> bool:
     defaults = load_user_defaults(os.path.dirname(os.path.abspath(target)))
     _, known = split_settings(defaults)
     lines = ["---", f"тип: {profile.names[0] if profile.names else profile.key}"]
-    for name in profile.required_fields:
+    # Поля титульного листа и листов, включённых профилем (© статьи), — без комментария
+    always = [spec for spec in profile.sheets.values() if spec.enabled]
+    required = list(dict.fromkeys(profile.required_fields + [f for s in always for f in s.required_fields]))
+    for name in required:
         if name not in known:
             lines.append(f"{name}: ")
-    optional = [k for k in profile.fields if k not in profile.required_fields and k not in known
+    optional = [k for k in profile.fields if k not in required and k not in known
                 and not profile.fields[k]]  # поля со значением по умолчанию не подсказываем
     if optional:
         lines.append("# необязательные поля:")
         lines += [f"# {k}: " for k in optional]
-    if profile.sheets:
-        listed = set(profile.required_fields) | set(optional) | set(known) | set(profile.fields)
-        lines.append(f"# дополнительные листы ({', '.join(profile.sheets)}) — включаются так:")
-        lines.append(f"# листы: [{', '.join(profile.sheets)}]")
-        for name, spec in profile.sheets.items():
+    extra_sheets = {name: spec for name, spec in profile.sheets.items() if not spec.enabled}
+    if extra_sheets:
+        listed = set(required) | set(optional) | set(known) | set(profile.fields)
+        lines.append(f"# дополнительные листы ({', '.join(extra_sheets)}) — включаются так:")
+        lines.append(f"# листы: [{', '.join(extra_sheets)}]")
+        for name, spec in extra_sheets.items():
             path = os.path.join(TITLES_DIR, spec.template)
             extra = [f for f in template_fields(path) if f not in listed] if os.path.isfile(path) else []
             if extra:

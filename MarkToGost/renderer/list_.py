@@ -19,12 +19,25 @@ def render_list_block(renderer, block: ListBlock):
         p = renderer.doc.add_paragraph()
 
         if block.ordered:
-            set_paragraph_formatting(
-                p,
-                align=WD_ALIGN_PARAGRAPH.JUSTIFY,
-                first_line_indent=Cm(DocumentSettings.FIRST_LINE_INDENT_CM),
-                line_spacing=DocumentSettings.LINE_SPACING
-            )
+            hanging = DocumentSettings.LIST_HANGING_CM
+            if hanging:
+                # Без красной строки, с выступом: список литературы статьи
+                set_paragraph_formatting(
+                    p,
+                    align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+                    left_indent=Cm(hanging),
+                    first_line_indent=Cm(-hanging),
+                    line_spacing=DocumentSettings.LINE_SPACING,
+                    space_before=0,
+                    space_after=0
+                )
+            else:
+                set_paragraph_formatting(
+                    p,
+                    align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+                    first_line_indent=Cm(DocumentSettings.FIRST_LINE_INDENT_CM),
+                    line_spacing=DocumentSettings.LINE_SPACING
+                )
 
             # Номер
             run = p.add_run(f"{i}. ")

@@ -20,3 +20,6 @@ output/
 
 # Личные данные для титульных листов (пример — examples/marktogost.yaml)
 /marktogost.yaml
+
+# Сборка плагина IDE
+ide/pycharm/build/

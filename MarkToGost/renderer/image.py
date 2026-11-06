@@ -92,6 +92,7 @@ def render_image_block(renderer, block: ImageBlock):
         try:
             img_path = export_drawio(img_path, drawio_page)
         except Exception as e:
+            renderer.numbering.next("рисунок")  # номер занят: ссылки посчитаны первым проходом
             p = renderer.doc.add_paragraph(f"[Ошибка экспорта draw.io: {os.path.basename(src_path)} — {e}]")
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             renderer._mark_content()
@@ -117,15 +118,10 @@ def render_image_block(renderer, block: ImageBlock):
         except Exception:
             pic_para.add_run(f"[Ошибка вставки: {os.path.basename(img_path)}]")
 
-        # Получаем номер изображения
-        # Если img_id указан и был собран на первом проходе, используем сохраненный номер
-        if block.img_id and block.img_id in renderer.image_refs:
-            fig_num = renderer.image_refs[block.img_id]
-        else:
-            fig_num = renderer.numbering.next("рисунок")
-            # Сохраняем в image_refs, если есть ID
-            if block.img_id:
-                renderer.image_refs[block.img_id] = fig_num
+        # Номер рисунка; счётчик продвигается всегда, номер совпадает с собранным первым проходом
+        fig_num = renderer.numbering.next("рисунок")
+        if block.img_id:
+            renderer.image_refs[block.img_id] = fig_num
 
         fname = os.path.basename(block.path)
         caption_text = block.caption or ""
@@ -133,9 +129,9 @@ def render_image_block(renderer, block: ImageBlock):
         if caption_text:
             # Заглавной делаем только первую букву, регистр остального сохраняем (IDEF0, RuDelia)
             caption_text = re.sub(r'[^\W\d_]', lambda m: m.group().upper(), caption_text.strip(), count=1)
-            caption_full = f"Рисунок {fig_num} — {caption_text}"  # тире по ГОСТ 7.32
+            caption_full = f"{DocumentSettings.FIGURE_PREFIX} {fig_num} {DocumentSettings.CAPTION_DASH} {caption_text}"
         else:
-            caption_full = f"Рисунок {fig_num}"
+            caption_full = f"{DocumentSettings.FIGURE_PREFIX} {fig_num}"
 
         cap_para = renderer.doc.add_paragraph(caption_full)
         cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -145,12 +141,13 @@ def render_image_block(renderer, block: ImageBlock):
         cap_para.clear()
         for part_text, is_italic in apply_italic_formatting(caption_full):
             run = cap_para.add_run(part_text)
-            set_run_font(run, size_pt=DocumentSettings.CAPTION_FONT_SIZE_PT,
+            set_run_font(run, size_pt=DocumentSettings.CAPTION_FONT_SIZE_PT, bold=DocumentSettings.CAPTION_BOLD,
                         italic=DocumentSettings.CAPTION_ITALIC or is_italic)
 
         renderer.image_map[fname] = str(fig_num)
         renderer._mark_content()
     else:
+        renderer.numbering.next("рисунок")
         p = renderer.doc.add_paragraph(f"[Изображение не найдено: {os.path.basename(img_path)}]")
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         renderer._mark_content()

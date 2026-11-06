@@ -1,7 +1,8 @@
 """Вставные листы: титульный лист, задание, отзыв и любые другие DOCX-шаблоны с полями {{имя}}.
 
 Лист вставляется отдельным разделом DOCX со своей вёрсткой (размер и поля страницы, вертикальное
-выравнивание) и начинается с новой страницы. Стили, на которые ссылается лист, и рисунки
+выравнивание) и начинается с новой страницы. Лист «в тексте» (шапка научной статьи) вставляется
+на месте, без разрывов, и вёрстку страницы не меняет. Стили, на которые ссылается лист, и рисунки
 переносятся из шаблона в документ.
 """
 
@@ -77,8 +78,15 @@ def _fill_paragraph(p_el, fields: Dict[str, str], unknown: Set[str]) -> None:
             for run in runs:
                 p_el.remove(run)
             continue
-        new_text = PLACEHOLDER.sub(lambda m: fields[m.group(1)], text)
         t_elements = [t for r in runs for t in r.iter(qn("w:t"))]
+        if sum(len(PLACEHOLDER.findall(t.text or "")) for t in t_elements) == len(names):
+            # Каждое поле целиком в своём прогоне — заменяем по прогонам, начертание строки сохраняется
+            # («Аннотация.» жирным курсивом, текст аннотации — курсивом)
+            for t in t_elements:
+                if PLACEHOLDER.search(t.text or ""):
+                    _set_multiline(t, PLACEHOLDER.sub(lambda m: fields[m.group(1)], t.text))
+            continue
+        new_text = PLACEHOLDER.sub(lambda m: fields[m.group(1)], text)
         for t in t_elements[1:]:
             t.text = ""
         _set_multiline(t_elements[0], new_text)
@@ -179,8 +187,25 @@ def _sheet_sectPr(src: Document, page_numbers: bool):
     return sect
 
 
-def insert_sheet(renderer, src: Document, page_numbers: bool = True) -> None:
-    """Вставляет содержимое шаблона отдельным разделом с новой страницы"""
+def _copy_body(renderer, src: Document) -> None:
+    """Содержимое шаблона (без свойств раздела) — в конец документа"""
+    doc = renderer.doc
+    body = doc.element.body
+    elements = [deepcopy(el) for el in src.element.body if el.tag != qn("w:sectPr")]
+    _copy_styles(src, doc, elements)
+    for el in elements:
+        _copy_images(src, doc, el)
+        _strip_unportable(el)
+        body.sectPr.addprevious(el)
+
+
+def insert_sheet(renderer, src: Document, page_numbers: bool = True, new_page: bool = True) -> None:
+    """Вставляет содержимое шаблона отдельным разделом с новой страницы или прямо в текст"""
+    if not new_page:
+        _copy_body(renderer, src)
+        renderer._mark_content()
+        return
+
     doc = renderer.doc
     body = doc.element.body
 
@@ -193,12 +218,7 @@ def insert_sheet(renderer, src: Document, page_numbers: bool = True) -> None:
     if prev is not None and not section_just_ended:
         end_section_here(body, deepcopy(body.sectPr))
 
-    elements = [deepcopy(el) for el in src.element.body if el.tag != qn("w:sectPr")]
-    _copy_styles(src, doc, elements)
-    for el in elements:
-        _copy_images(src, doc, el)
-        _strip_unportable(el)
-        body.sectPr.addprevious(el)
+    _copy_body(renderer, src)
 
     end_section_here(body, _sheet_sectPr(src, page_numbers))
 
@@ -234,4 +254,4 @@ def render_sheet_block(renderer, block: SheetBlock) -> None:
     src, unknown = fill_template(path, fields)
     for name in unknown:
         renderer.warnings.append(f"поле «{name}» в листе {os.path.basename(path)} не задано")
-    insert_sheet(renderer, src, page_numbers=block.page_numbers)
+    insert_sheet(renderer, src, page_numbers=block.page_numbers, new_page=block.new_page)

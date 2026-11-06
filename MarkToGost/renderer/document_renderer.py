@@ -59,6 +59,34 @@ class DocumentRenderer:
         self.titles_dir = ""
         self.warnings = []
 
+    def collect_refs(self, blocks: List[BaseBlock]) -> None:
+        """Первый проход: номера рисунков и формул с id, чтобы ссылка @id работала и до объекта.
+
+        Нумерация повторяет рендеринг: те же заголовки и объекты в том же порядке.
+        """
+        numbering = Numbering(DocumentSettings.OBJECT_NUMBERING)
+        by_refs = " ".join(str(DocumentSettings.FORMULA_NUMBERING).replace("_", " ").lower().split()) == "по ссылкам"
+
+        def walk(items):
+            for block in items:
+                if isinstance(block, Section):
+                    if block.section_id and not block.toc:
+                        numbering.on_heading(block.section_id)
+                    walk(block.blocks)
+                elif isinstance(block, HeadingBlock):
+                    numbering.on_heading(block.text)
+                elif isinstance(block, ImageBlock):
+                    number = numbering.next("рисунок")
+                    if block.img_id:
+                        self.image_refs[block.img_id] = number
+                elif isinstance(block, FormulaBlock) and not block.number:
+                    if block.formula_id or not by_refs:
+                        number = numbering.next("формула")
+                        if block.formula_id:
+                            self.formula_refs[block.formula_id] = number
+
+        walk(blocks)
+
     def _is_document_start(self) -> bool:
         """Проверка начала документа"""
         return len(self.doc.paragraphs) == 0

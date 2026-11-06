@@ -39,6 +39,14 @@ def replace_image_refs(text: str, image_refs: Dict[str, int]) -> str:
 
     return result
 
+def replace_formula_refs(text: str, formula_refs: Dict[str, str]) -> str:
+    """Ссылка @id на формулу выше по тексту → «(N)»; неизвестные @id остаются как есть"""
+    if not text or not formula_refs or "@" not in text:
+        return text
+    return re.sub(r'@([\w-]+)',
+                  lambda m: f"({formula_refs[m.group(1)]})" if m.group(1) in formula_refs else m.group(0), text)
+
+
 def split_md_table_row(line: str) -> list:
     """Разбор строки markdown-таблицы"""
     s = line.strip()

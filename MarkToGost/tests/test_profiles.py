@@ -33,6 +33,12 @@ class TestFrontMatter:
         assert data == {"тип": "курсовая", "тема": "База данных"}
         assert body == "# ВВЕДЕНИЕ\n"
 
+    def test_numbers_keep_source_text(self):
+        data, _ = split_front_matter("---\nудк: 004.8\nгруппа: 0302\nразмер_шрифта: 12\n---\n")
+        formatting, fields = split_settings(data)
+        assert fields == {"удк": "004.8", "группа": "0302"}
+        assert formatting["размер_шрифта"] + 1 == 13
+
     def test_invalid_front_matter(self):
         with pytest.raises(FrontMatterError):
             split_front_matter("---\n- список\n---\nтекст")
@@ -335,3 +341,101 @@ class TestCreateDocument:
         doc = create_document(KURSOVAYA)
         title_sectPr = doc.sections[0]._sectPr
         assert title_sectPr.find(qn("w:titlePg")) is not None
+
+
+# ================================
+# Научная статья: шапка в тексте, подписи, список литературы
+# ================================
+
+WORDS_80 = " ".join(["слово"] * 80)
+
+STATYA = f"""---
+тип: статья
+удк: "004.8"
+название: Распознавание образов
+авторы: И.И. Иванов
+email: ivanov@mail.ru
+организация: ЮРГПУ (НПИ), г. Новочеркасск, Россия
+аннотация: {WORDS_80}
+ключевые_слова: нейросеть
+название_en: Pattern recognition
+авторы_en: I.I. Ivanov
+организация_en: SRSPU (NPI), Novocherkassk, Russia
+аннотация_en: {WORDS_80}
+ключевые_слова_en: neural network
+копирайт: Иванов И.И.
+---
+
+# Введение
+
+Текст введения, см. @eq.
+
+$$
+E = m c^2
+$$ {{#eq}}
+
+Таблица — Результаты
+
+| Модель | Точность |
+|---|---|
+| А | 90 |
+
+# Заключение
+
+Выводы.
+
+# Список цитируемой литературы
+
+1. Источник первый.
+"""
+
+
+class TestArticle:
+
+    def test_profile(self):
+        profile = load_profile("научная статья")
+        assert profile.key == "statya"
+        assert profile.title_new_page is False
+        assert profile.word_limits["аннотация"] == (70, 100)
+        assert profile.title_sheet().new_page is False
+        assert profile.sheets["копирайт"].new_page is False
+
+    def test_document(self):
+        warnings = []
+        doc = create_document(STATYA, warnings=warnings)
+        texts = [p.text for p in doc.paragraphs]
+        assert warnings == []
+        assert len(doc.sections) == 1                         # шапка и © — в тексте, без разрывов
+        assert texts[0] == "УДК 004.8"
+        assert any("© Иванов И.И., 20" in t for t in texts[-3:])
+        assert "Введение" in texts                            # заголовки не прописными
+        caption = next(p for p in doc.paragraphs if p.text.startswith("Таблица 1 – "))
+        assert caption.runs[0].bold
+        assert caption.alignment == 0                         # слева
+        assert any("см. (1)." in t for t in texts)            # ссылка на формулу раньше формулы
+
+    def test_summary_keeps_run_formatting(self):
+        doc = create_document(STATYA)
+        p = next(p for p in doc.paragraphs if p.text.startswith("Аннотация."))
+        assert p.runs[0].bold and p.runs[0].italic
+        assert not p.runs[1].bold and p.runs[1].italic
+        assert p.runs[1].text.startswith(" слово")
+
+    def test_references_section_formatting(self):
+        doc = create_document(STATYA)
+        item = next(p for p in doc.paragraphs if p.text.startswith("1. Источник"))
+        assert item.runs[-1].font.size.pt == 12
+        assert round(item.paragraph_format.left_indent.cm, 2) == 0.5
+        assert round(item.paragraph_format.first_line_indent.cm, 2) == -0.5
+        intro = next(p for p in doc.paragraphs if p.text.startswith("Текст введения"))
+        assert intro.runs[0].font.size.pt == 14              # оформление раздела не вышло за его пределы
+
+    def test_word_limits_reported(self):
+        warnings = []
+        create_document(STATYA.replace(f"аннотация: {WORDS_80}", "аннотация: коротко"), warnings=warnings)
+        assert "в поле «аннотация» 1 слов, нужно 70–100" in warnings
+
+    def test_hyphenation_and_header_distance(self):
+        doc = create_document(STATYA)
+        assert doc.settings.element.find(qn("w:autoHyphenation")) is not None
+        assert round(doc.sections[0].header_distance.cm, 2) == 1.25

@@ -1,16 +1,39 @@
+from contextlib import contextmanager
+
 from MarkToGost.parser.blocks import Section, HeadingBlock
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from MarkToGost.config import DocumentSettings
+from MarkToGost.profiles import apply_formatting
 from MarkToGost.utils.formatting import set_run_font, set_paragraph_formatting
 from MarkToGost.utils.toc import add_toc, get_heading_level_from_number
 from MarkToGost.renderer.text import render_heading_block
+
+
+@contextmanager
+def _section_formatting(formatting: dict):
+    """Оформление раздела из профиля действует только внутри раздела"""
+    if not formatting:
+        yield
+        return
+    snapshot = {k: getattr(DocumentSettings, k) for k in vars(DocumentSettings) if k.isupper()}
+    apply_formatting(formatting)
+    try:
+        yield
+    finally:
+        for key, value in snapshot.items():
+            setattr(DocumentSettings, key, value)
 
 
 def render_section_block(renderer, section: Section):
     """Рендеринг раздела с его блоками
     Строгое правило: раздел ВСЕГДА начинается и заканчивается разрывом (если включено)
     """
+    with _section_formatting(section.formatting):
+        _render_section(renderer, section)
+
+
+def _render_section(renderer, section: Section):
     if not section.add_page_breaks:
         # Если page breaks отключены, просто рендерим содержимое
         if section.section_id:

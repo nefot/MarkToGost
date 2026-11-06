@@ -97,6 +97,7 @@ class SheetBlock(BaseBlock):
     template: str
     page_numbers: bool = True  # печатать номер на первой странице листа
     name: str = ""             # имя листа из профиля («титульный лист», «задание»)
+    new_page: bool = True      # False — содержимое шаблона идёт в тексте, без разрывов
 
 
 @dataclass
@@ -107,3 +108,4 @@ class Section(BaseBlock):
     heading_level: int = 4  # Уровень заголовка раздела (2-6), по умолчанию 4 (####)
     add_page_breaks: bool = True  # Добавлять page breaks перед/после раздела (default=True)
     toc: bool = False  # раздел — содержание (оглавление)
+    formatting: dict = field(default_factory=dict)  # оформление раздела из профиля (список литературы статьи)

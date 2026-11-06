@@ -1,5 +1,5 @@
 import re
-from typing import List
+from typing import List, Optional
 from MarkToGost.parser.blocks import *
 from MarkToGost.utils.document_helpers import (
     is_md_table_row, is_md_table_separator, split_md_table_row, normalize_table_caption
@@ -12,7 +12,8 @@ from MarkToGost.parser.blocks import HtmlTableBlock, HtmlTableRow, HtmlTableCell
 
 
 TOC_TITLES = {"ОГЛАВЛЕНИЕ", "СОДЕРЖАНИЕ"}
-# Вставной лист в тексте: {{лист: путь/шаблон.docx}} или {{лист: шаблон.docx | без номера}}
+# Вставной лист в тексте: {{лист: путь/шаблон.docx}}, {{лист: шаблон.docx | без номера}},
+# {{лист: шаблон.docx | в тексте}} — без разрывов страниц
 SHEET_LINE = re.compile(r'^\{\{\s*лист\s*:\s*([^|}]+?)\s*(?:\|\s*([^}]*?)\s*)?\}\}$', re.I)
 
 
@@ -67,7 +68,8 @@ class MarkdownParser:
         match = SHEET_LINE.match(line)
         options = (match.group(2) or "").lower()
         self.index += 1
-        return SheetBlock(template=match.group(1), page_numbers="без номера" not in options)
+        return SheetBlock(template=match.group(1), page_numbers="без номера" not in options,
+                          new_page="в тексте" not in options)
 
     def _is_heading(self, line: str) -> bool:
         return line.startswith("#")
@@ -85,12 +87,16 @@ class MarkdownParser:
         line = line[2:].strip()  # Убираем начальные $$
 
         buffer = []
+        formula_id = None
         while True:
             if "$$" in line:
-                before, _, _ = line.partition("$$")
+                before, _, after = line.partition("$$")
                 before = before.strip()
                 if before:
                     buffer.append(before)
+                # Идентификатор для ссылок: «$$ {#id}» в строке закрытия формулы
+                id_match = re.match(r'^\s*\{#([\w-]+)\}', after)
+                formula_id = id_match.group(1) if id_match else None
                 break
             else:
                 if line:
@@ -128,7 +134,7 @@ class MarkdownParser:
 
         explanation = "\\n".join(explanation_lines).strip() if explanation_lines else None
 
-        return FormulaBlock(latex=formula_text, explanation=explanation)
+        return FormulaBlock(latex=formula_text, explanation=explanation, formula_id=formula_id)
 
     def _extract_section_info(self, line: str) -> tuple[Optional[str], int, bool]:
         """Извлечение ID раздела, уровня заголовка и параметров из строки [//]: #### (ID)[params]
@@ -287,16 +293,28 @@ class MarkdownParser:
         return is_md_table_row(current) and is_md_table_separator(next_line)
 
     def _is_table_caption(self) -> bool:
-        """Подпись «Таблица N — ...» в строке непосредственно перед таблицей"""
-        if self.index + 2 >= len(self.lines):
-            return False
+        """Подпись «Таблица N — ...» перед таблицей: вплотную или через одну пустую строку.
+        Пустая строка нужна предпросмотру Markdown (GFM): иначе подпись и таблица сливаются в абзац."""
         line = self.lines[self.index].strip()
         if not normalize_table_caption(line):
             return False
-        following = self.lines[self.index + 1].strip()
+        start = self.index + 1
+        if start < len(self.lines) and not self.lines[start].strip():
+            start += 1
+        if start >= len(self.lines):
+            return False
+        following = self.lines[start].strip()
         if self._is_html_table_start(following):
             return True
-        return is_md_table_row(following) and is_md_table_separator(self.lines[self.index + 2].strip())
+        return (start + 1 < len(self.lines) and is_md_table_row(following)
+                and is_md_table_separator(self.lines[start + 1].strip()))
+
+    def _caption_before(self) -> Optional[str]:
+        """Подпись таблицы, начинающейся в текущей строке (см. _is_table_caption)"""
+        i = self.index - 1
+        if i >= 0 and not self.lines[i].strip():
+            i -= 1
+        return normalize_table_caption(self.lines[i].strip()) if i >= 0 else None
 
     def _is_list_start(self) -> bool:
         """Проверка начала списка"""
@@ -325,14 +343,7 @@ class MarkdownParser:
         return ImageBlock(path=path, caption=caption, img_id=img_id, landscape="landscape" in attrs)
 
     def _parse_table(self) -> TableBlock:
-        table_caption = None
-
-        # Проверяем caption перед таблицей
-        if self.index > 0:
-            prev_line = self.lines[self.index - 1].strip()
-            prev_caption = normalize_table_caption(prev_line)
-            if prev_caption:
-                table_caption = prev_caption
+        table_caption = self._caption_before()
 
         header = self.lines[self.index].strip()
         separator = self.lines[self.index + 1].strip()
@@ -357,10 +368,21 @@ class MarkdownParser:
         first_line = self.lines[self.index].strip()
         ordered = bool(re.match(r'^\s*\d+[.)]\s+', first_line))
 
+        marker = r'^\s*\d+[.)]\s+' if ordered else r'^\s*[-–—*+]\s+'
         while self.index < len(self.lines):
-            line = self.lines[self.index].strip()
+            raw = self.lines[self.index]
+            line = raw.strip()
             if not line:
                 break
+
+            # Продолжение пункта, перенесённое на следующую строку с отступом (как в обычном Markdown)
+            # («2017. — 24 с.» с отступом — тоже продолжение: следующий пункт имел бы номер по порядку)
+            numbered = re.match(r'^(\d+)[.)]\s', line)
+            next_item = re.match(marker, line) and not (ordered and int(numbered.group(1)) != len(items) + 1)
+            if items and raw[:1] in (' ', '\t') and not next_item:
+                items[-1] += ' ' + line
+                self.index += 1
+                continue
 
             if ordered:
                 m = re.match(r'^\d+[.)]\s+(.*)', line)
@@ -415,7 +437,12 @@ class MarkdownParser:
                 break
             if line.startswith("$$"):  # Формула
                 break
-            if self._is_table_start() or self._is_list_start() or self._is_table_caption():
+            if self._is_table_start() or self._is_table_caption():
+                break
+            # Строка «— …» внутри перенесённого абзаца — продолжение текста, а не список;
+            # тире начинает список только после законченной строки («задачи:», «пункт;»)
+            if self._is_list_start() and not (buffer and re.match(r'^[–—]\s', line)
+                                              and not re.search(r'[:;.!?]$', buffer[-1])):
                 break
             if self._is_section_start(line) or self._is_sheet(line):
                 break
@@ -435,7 +462,7 @@ class MarkdownParser:
         return line.strip().lower().startswith('<table')
 
     def _parse_html_table(self) -> HtmlTableBlock:
-        caption = normalize_table_caption(self.lines[self.index - 1].strip()) if self.index > 0 else None
+        caption = self._caption_before()
         html_lines = []
         while self.index < len(self.lines):
             l = self.lines[self.index]

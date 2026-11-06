@@ -1,7 +1,7 @@
 # structure.py
 """Структура документа по профилю: разделы из «# Заголовок», содержание, проверка состава"""
 
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from MarkToGost.parser.blocks import BaseBlock, HeadingBlock, Section, SheetBlock
 from MarkToGost.profiles import Profile, SheetSpec, _norm
@@ -65,6 +65,25 @@ def check_fields(fields: dict, required: List[str], sheet: str = "титульн
             for name in required if not str(fields.get(name, "")).strip()]
 
 
+def check_word_limits(fields: dict, limits: Dict[str, Tuple[int, int]]) -> List[str]:
+    """Объём полей в словах (аннотация статьи — 70–100 слов); пустые поля проверяет check_fields"""
+    warnings = []
+    for name, (low, high) in limits.items():
+        count = len(str(fields.get(name, "")).split())
+        if count and not low <= count <= high:
+            warnings.append(f"в поле «{name}» {count} слов, нужно {low}–{high}")
+    return warnings
+
+
+def apply_section_formatting(blocks: List[BaseBlock], profile: Profile) -> None:
+    """Разделам, совпавшим с элементом структуры, передаётся его «оформление»"""
+    for section in _top_sections(blocks):
+        for item in profile.structure:
+            if item.formatting and item.matches(section.section_id):
+                section.formatting = dict(item.formatting)
+                break
+
+
 def _is_anchor(block: BaseBlock, anchor: str) -> bool:
     """Подходит ли блок как место вставки: лист по имени, содержание, раздел по заголовку или его началу"""
     target = _norm(anchor)
@@ -83,7 +102,8 @@ def place_sheets(blocks: List[BaseBlock], specs: List[SheetSpec]) -> Tuple[List[
     result = list(blocks)
     warnings = []
     for spec in specs:
-        sheet = SheetBlock(template=spec.template, page_numbers=spec.page_numbers, name=spec.name)
+        sheet = SheetBlock(template=spec.template, page_numbers=spec.page_numbers, name=spec.name,
+                           new_page=spec.new_page)
         if spec.place == "начало":
             index = 0
             while index < len(result) and isinstance(result[index], SheetBlock):

@@ -40,6 +40,18 @@ class DocumentSettings:
     CODE_FONT_SIZE_PT = None
     CODE_LINE_SPACING = None
 
+    # Подписи: «Рисунок 1 — …», «Таблица 1 — …»; у статей — «Рис. 1 – …», жирные
+    FIGURE_PREFIX = "Рисунок"
+    CAPTION_DASH = "—"
+    CAPTION_BOLD = False
+    TABLE_CAPTION_ALIGN = "справа"   # слева | по центру | справа
+
+    UPPERCASE_H1 = True              # заголовки первого уровня прописными
+    LIST_HANGING_CM = None           # нумерованный список с выступом (список литературы статьи)
+    FORMULA_NUMBERING = "все"        # все | по ссылкам — номер только у формул с {#id}
+    HEADER_DISTANCE_CM = None        # расстояние до колонтитулов; None — как в Word
+    AUTO_HYPHENATION = False
+
 class DrawioSettings:
     """Экспорт схем draw.io (см. utils/drawio.py)"""
     EXE_CANDIDATES = [

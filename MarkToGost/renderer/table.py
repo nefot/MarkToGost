@@ -9,7 +9,9 @@ from docx.shared import Cm, Pt
 from MarkToGost.formula_renderer import add_inline_formula
 from MarkToGost.config import DocumentSettings
 from MarkToGost.parser.blocks import TableBlock
-from MarkToGost.utils.formatting import apply_italic_formatting, set_run_font, set_paragraph_formatting
+from MarkToGost.utils.formatting import (
+    apply_italic_formatting, set_run_font, set_paragraph_formatting, table_caption_align, table_caption_text
+)
 from MarkToGost.utils.xml_helpers import set_table_borders, set_repeat_table_header
 from MarkToGost.utils.document_helpers import split_md_table_row
 
@@ -88,7 +90,7 @@ def render_table_block(renderer, block: TableBlock):
     numbered = bool(block.caption)
     if numbered:
         cap = renderer.doc.add_paragraph()
-        cap.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        cap.alignment = table_caption_align()
         set_paragraph_formatting(
             cap,
             first_line_indent=None,
@@ -98,10 +100,11 @@ def render_table_block(renderer, block: TableBlock):
             line_spacing=DocumentSettings.LINE_SPACING
         )
         cap.paragraph_format.keep_with_next = True
-        caption_full = f"Таблица {renderer.numbering.next('таблица')} — {block.caption}"
+        caption_full = table_caption_text(renderer.numbering.next('таблица'), block.caption)
         for part_text, is_italic in apply_italic_formatting(caption_full):
             run = cap.add_run(part_text)
-            set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=False, italic=is_italic)
+            set_run_font(run, size_pt=DocumentSettings.FONT_SIZE_PT, bold=DocumentSettings.CAPTION_BOLD,
+                         italic=is_italic)
 
     # --- Таблица ---
     table = renderer.doc.add_table(rows=len(parsed_rows), cols=max_cols)

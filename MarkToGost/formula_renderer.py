@@ -26,6 +26,7 @@ from lxml import etree
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 import re
@@ -221,36 +222,40 @@ def _insert_omml_table(doc: Document, omml_nodes: List,
                         font_size_pt: int):
     """
     Вставляет формулу в таблицу без границ:
-      | <OMML по центру> | (N) по правому краю |
+      | (пусто) | <OMML по центру> | (N) по правому краю |
+
+    Пустая левая колонка равна колонке номера, поэтому формула стоит
+    по центру строки, а номер — на уровне середины формулы.
     """
     sec = doc.sections[0]
     usable_w = sec.page_width.cm - sec.left_margin.cm - sec.right_margin.cm
 
-    table = doc.add_table(rows=1, cols=2)
+    table = doc.add_table(rows=1, cols=3)
     table.autofit = False
 
-    # Ширины: 85% формула, 15% номер
-    w_formula = Cm(usable_w * 0.85)
-    w_number = Cm(usable_w * 0.15)
-    table.columns[0].width = w_formula
-    table.columns[1].width = w_number
+    # Ширины: 15% пусто, 70% формула, 15% номер. Word берёт ширину из ячеек,
+    # ширины одних колонок недостаточно
+    widths = (Cm(usable_w * 0.15), Cm(usable_w * 0.70), Cm(usable_w * 0.15))
+    for column, cell, width in zip(table.columns, table.rows[0].cells, widths):
+        column.width = width
+        cell.width = width
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fmt = cell.paragraphs[0].paragraph_format
+        fmt.first_line_indent = Cm(0)
+        fmt.left_indent = Cm(0)
+        fmt.space_before = Pt(6)
+        fmt.space_after = Pt(6)
 
-    # --- Левая ячейка: формула ---
-    left = table.cell(0, 0)
-    left_p = left.paragraphs[0]
+    # --- Средняя ячейка: формула ---
+    left_p = table.cell(0, 1).paragraphs[0]
     left_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    left_p.paragraph_format.space_before = Pt(6)
-    left_p.paragraph_format.space_after = Pt(6)
 
     for node in omml_nodes:
         left_p._p.append(deepcopy(node))
 
     # --- Правая ячейка: номер ---
-    right = table.cell(0, 1)
-    right_p = right.paragraphs[0]
+    right_p = table.cell(0, 2).paragraphs[0]
     right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    right_p.paragraph_format.space_before = Pt(6)
-    right_p.paragraph_format.space_after = Pt(6)
 
     if number:
         run = right_p.add_run(f"({number})")
